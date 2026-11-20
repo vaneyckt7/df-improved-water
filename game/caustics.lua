@@ -380,9 +380,14 @@ local function water_map(vp)
                     if not d.liquid_type then  -- false = water
                         local k = (y - vp.y1 + M) * W + (x - vp.x1 + M)
                         local b = getBlock(x, y, z)
-                        local v = b and DIRS[names[b.liquid_flow[x % 16][y % 16].perm_flow_dir]]
+                        local nm = b and names[b.liquid_flow[x % 16][y % 16].perm_flow_dir]
+                        local v = DIRS[nm]
+                        -- 'none' / 'down' = river water with no direction of its own (the column where
+                        -- a river leaves the map): it takes the direction of the river water around
+                        -- it. Ponds are 'inactive' and stay still.
+                        local flowing = v or nm == 'none' or nm == 'down'
                         -- 1 = flowing, 2 = still, 3 = creature in the tile (leave it unlit)
-                        water[k] = (occ.unit or occ.unit_grounded) and 3 or (v and 1 or 2)
+                        water[k] = (occ.unit or occ.unit_grounded) and 3 or (flowing and 1 or 2)
                         if v then
                             local n = (v[1] ~= 0 and v[2] ~= 0) and 0.7071 or 1
                             fx[k], fy[k] = v[1] * n, v[2] * n
