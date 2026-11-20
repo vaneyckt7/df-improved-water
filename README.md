@@ -7,6 +7,19 @@
 - `caustics_rings.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
 - `caustics_fields.bin` - data for the river pattern
 
+Sea (`SEA_SWELL`, `SEA_FOLLOW`): salt water with no flow shows the still-water caustics (`SEA_CAUSTICS`, no
+rings) and foam crests that follow the game's own waves (`world.event.ocean_waves`). Waves standing side by
+side are joined into wavefronts (`SEA_ROWS`, `SEA_FRONT_*`) and each front is drawn as one continuous line:
+every column along it gets foam at a smoothed position, columns without a wave are filled in, and a sloping
+front uses foam leaning to match (`SEA_FRONT_SLANT`; thirds of a tile per column, baked when first needed).
+Foam fades in as a wave nears its destination (`SEA_BUILD`). On a foam tile the caustics go to a lower
+viewport layer (`SEA_UNDER`) so both show. `caustics_swell.bin` holds 128 frames of 128x128 level bytes,
+crest travelling west; the script mirrors, turns and slants it. `wavetiles.lua` is a debug overlay that
+marks the tile behind each game wave with an arrow (`overlay enable wavetiles.show`).
+
+    python wavegif.py ...                                   # foam frames from a wave animation (see the script)
+    python swell.py caustics_swell.bin 4 0.55 preview.png   # earlier drawn swell: crests per 128 px, share drawn
+
 `tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
 
 Current still water: taken from a 128-frame looping grayscale caustics animation (not in this repo; the
