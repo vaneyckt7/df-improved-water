@@ -4,7 +4,7 @@
 
 - `caustics.lua` - the overlay script (river pattern is generated in Lua; still water plays baked frames)
 - `caustics_still.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint line, 2-3 bright, 4 very faint, 5 white, 6 shadow)
-- `caustics_rings.bin` - 64 pre-composited ring clips, generated from the still file (regenerate whenever it changes)
+- `caustics_rings.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
 - `caustics_fields.bin` - data for the river pattern
 
 `tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
@@ -16,6 +16,20 @@ the opposite edges before each frame is shrunk to 128x128 px. Levels by brightne
 1 line, 5 white knots. No shadow.
 
     python fromgif.py <animation.gif> caustics_still.bin 96 72,82,96.5   # blend band px, halo/line/white percentiles
+    python ringgif.py <ripple.gif> caustics_still.bin caustics_rings.bin 4 7 28 0.72,0.54,0.40,0.28,0.17,0.08 0.5 0.6 7,8,9,10,11,12 1
+    python ringcols.py caustics.lua 0.26
+
+Current rings: shape taken from a 128-frame animation of one widening ripple (not in this repo; the build
+used `~/Downloads/blue_bubble_ripple_128_frames.gif`, 768x768). `ringgif.py` reads its brightness profile
+along the radius per frame and redraws it at tile size in six crest levels (7-12), 28 frames long, faint for
+the first two frames, with a faint trough (level 6) for the first 60%. The last argument `1` keeps the
+caustic lines on top of the ring. `ringcols.py` writes the six crest colours into the script: the
+animation's lightening (crest minus its background) times a strength (0.26 chosen by eye in game), the
+brighter steps pulled up to 40% toward the water's teal hue, solved for the overlay blend on in-game water
+of about RGB 1,78,90. `ringstrip.py` draws a mock-up strip of one ring over its life.
+
+Earlier rings (thin drawn circle in the caustic colours, 22 frames, up to commit b7c0aa5):
+
     python rings2.py caustics_still.bin caustics_rings.bin 4
 
 Also tried: the tileable variant `water_caustics_tileable_128_frames.gif` (band 0; liked less), and a
