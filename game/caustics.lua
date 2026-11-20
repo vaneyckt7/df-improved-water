@@ -41,13 +41,15 @@ RING_COLS = {0x87FDEE3A, 0x80F9EB3B, 0x75FFF03C, 0x70F9E935, 0x69FDEA2E, 0x63FDE
 RING_CHANCE = 15
 -- TRIAL: flowing water plays the still-water frames, carried along with the flow at this many px per step
 -- (0 = the river's own generated pattern). Whole numbers only, so the 128-step loop closes without a jump.
-FLOW_STILL = 0
+FLOW_STILL = 1
 -- TRIAL: on flowing water the pattern itself changes this many still-water frames per step (1 = as on the pond),
 -- so its own shimmer is not drowned out by the drift. Whole numbers only.
 FLOW_ANIM = 2
 -- TRIAL: where two flow directions meet, the tiles on both sides of the border show both directions' patterns
 -- together, each one step fainter, so lines fade across the border instead of being cut off at it.
 FLOW_FADE = true
+-- TRIAL: true = on those border tiles each pattern is one step fainter; false = both at full strength.
+FLOW_FADE_DIM = false
 state = state or {}
 state.sets = state.sets or {}            -- frame sets keyed by flow direction
 state.stats = state.stats or {n=0, us=0}
@@ -143,7 +145,7 @@ local function build_still_frame(data, o, ox, oy)
 end
 
 -- Border between two flow directions: both patterns, each one step fainter (white -> line -> very faint -> off).
-local DIMMED = {[0] = 0, 4, 1, 1, 0, 1, 0}
+local DIMMED = FLOW_FADE_DIM and {[0] = 0, 4, 1, 1, 0, 1, 0} or {[0] = 0, 1, 2, 3, 4, 5, 6}
 local RANK = {[0] = 0, 2, 3, 4, 1, 3, 0}
 local function build_mix_frame(data, o, da, db)
     local pix, base = {}, (o * FLOW_ANIM % STEPS) * N * N
