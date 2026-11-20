@@ -30,6 +30,7 @@ GLINT_DIM = 0x94FFFFA8
 -- points where its lines meet.
 STILL_FAINT = 0x64FFFF40
 STILL_VFAINT = 0x57FFFF40   -- level 4: very faint long lines under the streaks
+STILL_CROSS = 0x84FFFFFF    -- level 5: where two still-water lines overlap: white, same strength as HI (rings keep HI/GLINT)
 -- Rings: now and then a thin circle pops up in a still-water tile, widens and fades.
 -- RING_CHANCE is the chance (per 1000) that a tile plays each ring slot it is offered; every
 -- tile is offered 4 slots per loop, so 1000 tiles of pond show about 4 * RING_CHANCE rings a loop.
@@ -117,7 +118,7 @@ local function load_still()
     return still_data
 end
 local function build_still_frame(data, o)
-    local pix, base, col = {}, o * N * N, {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT}
+    local pix, base, col = {}, o * N * N, {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS}
     for y = 0, N - 1 do
         local row = {data:byte(base + y * N + 1, base + y * N + N)}
         local at = y * N
@@ -151,7 +152,7 @@ local function build_ring(rd, e)  -- e is 0-based
     local pos, start = s:byte(3 + 2 * e, 4 + 2 * e)
     if pos > 15 or start >= STEPS then return false end
     local base = 2 + 2 * rd.ev + e * life * TP * TP
-    local col, pix, n = {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT}, {}, 0
+    local col, pix, n = {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS}, {}, 0
     for y = 0, TP - 1 do
         for a = 0, life - 1 do
             local at = base + (a * TP + y) * TP
@@ -281,7 +282,7 @@ local SMOOTH = 4
 -- for each river where it crosses the fort's world tile (0..~2900 in a medium world,
 -- median ~20), so the drift speed of flowing water follows that: a trickle steps every
 -- SLOW_MS, a great river every FAST_MS. Still water shimmers in place at STILL_MS.
-SLOW_MS, FAST_MS, STILL_MS = 120, 50, 52
+SLOW_MS, FAST_MS, STILL_MS = 120, 50, 80
 local function river_step_ms()
     local site = dfhack.world.getCurrentSite()
     local id = site and site.id or -1

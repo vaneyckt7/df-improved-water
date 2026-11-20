@@ -3,11 +3,22 @@
 `game/` holds the files as installed in `<Dwarf Fortress>/dfhack-config/scripts/`:
 
 - `caustics.lua` - the overlay script (river pattern is generated in Lua; still water plays baked frames)
-- `caustics_still.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint streak, 2-3 bright points, 4 very faint long line)
+- `caustics_still.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint line, 2-3 bright, 4 very faint long line, 5 line overlap)
 - `caustics_rings.bin` - 64 pre-composited ring clips, generated from the still file (regenerate whenever it changes)
 - `caustics_fields.bin` - data for the river pattern
 
-`tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow):
+`tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
+
+Current still water: straight lines from two sliding Voronoi webs (20 dots each on 128x128 px, one
+slides right and one up by 1 px per frame; light where both have an edge), level 1 faint line,
+level 5 line overlap (white, `STILL_CROSS` in the script):
+
+    python voro.py tmp_X20.bin 5 20 7 90,97.5            # seed, dots, edge fade px, faint/overlap percentiles
+    python post3.py tmp_X20.bin still_Y20.bin 3 4.5 12   # cut long lines, despike, drop crumbs
+    python relabel.py still_Y20.bin caustics_still.bin   # overlaps: level 2 -> 5
+    python rings2.py caustics_still.bin caustics_rings.bin 4
+
+Earlier still water (curved lines from a simulated wave surface, commit 12e63f5):
 
     python bake3.py tmp_S3.bin 21 4 8.5 40 1.4 0.95 0.6 93.5,97.6,99.4 1.5      # short-line wave field
     python post2.py tmp_S3.bin still_V1.bin 3 4.5 10 1                           # cut, drop crumbs, tapered widening

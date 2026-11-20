@@ -5,7 +5,7 @@ DF="$HOME/Library/Containers/com.isaacmarovitz.Whisky/Bottles/BC48C107-7437-4AE0
 cp "$1" "$DF/dfhack-config/scripts/caustics_still.bin"; [ -n "$3" ] && cp "$3" "$DF/dfhack-config/scripts/caustics_rings.bin"; a=$(wc -l < "$L"); cd $SP/df
 $SP/vid/venv/bin/python - <<'PY'
 import bg,time
-bg.lua("dfhack.run_command('overlay','disable','caustics.overlay') require('plugins.overlay').rescan() local c=reqscript('caustics') c.state.cache=nil c.state.sets.none=nil c.state.rings=nil c.state.partial={} c.state.stats={n=0,us=0} dfhack.run_command('overlay','enable','caustics.overlay')",timeout=120)
+bg.lua("dfhack.run_command('overlay','disable','caustics.overlay') require('plugins.overlay').rescan() local c=reqscript('caustics') c.state.cache=nil c.state.sets.none=nil c.state.sets.shallow=nil c.state.rings=nil c.state.partial={} c.state.stats={n=0,us=0} dfhack.run_command('overlay','enable','caustics.overlay')",timeout=120)
 time.sleep(18)
 bg.lua("local c=reqscript('caustics') c.state.stats={n=0,us=0}")
 time.sleep(3)
