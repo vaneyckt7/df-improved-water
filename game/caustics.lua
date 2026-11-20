@@ -41,7 +41,7 @@ RING_COLS = {0x87FDEE3A, 0x80F9EB3B, 0x75FFF03C, 0x70F9E935, 0x69FDEA2E, 0x63FDE
 RING_CHANCE = 15
 -- TRIAL: flowing water plays the still-water frames, carried along with the flow at this many px per step
 -- (0 = the river's own generated pattern). Whole numbers only, so the 128-step loop closes without a jump.
-FLOW_STILL = 1
+FLOW_STILL = 0
 -- TRIAL: on flowing water the pattern itself changes this many still-water frames per step (1 = as on the pond),
 -- so its own shimmer is not drowned out by the drift. Whole numbers only.
 FLOW_ANIM = 2
