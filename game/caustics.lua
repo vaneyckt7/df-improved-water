@@ -218,15 +218,15 @@ local function bake_ring()
 end
 
 local function build_frame(dir, o)
-    if not DIRS[dir] then
-        local data = load_still()
-        if data then return build_still_frame(data, o) end
-    end
     local da, db = dir:match('^(%a+)%+(%a+)$')
     if da then
         local data = load_still()
         if data then return build_mix_frame(data, o, DIRS[da], DIRS[db]) end
         dir = da
+    end
+    if not DIRS[dir] then
+        local data = load_still()
+        if data then return build_still_frame(data, o) end
     end
     if DIRS[dir] and FLOW_STILL > 0 then
         local data = load_still()
