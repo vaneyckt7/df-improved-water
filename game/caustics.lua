@@ -39,6 +39,15 @@ RING_COLS = {0x87FDEE3A, 0x80F9EB3B, 0x75FFF03C, 0x70F9E935, 0x69FDEA2E, 0x63FDE
 -- RING_CHANCE is the chance (per 1000) that a tile plays each ring slot it is offered; every
 -- tile is offered 4 slots per loop, so 1000 tiles of pond show about 4 * RING_CHANCE rings a loop.
 RING_CHANCE = 15
+-- TRIAL: flowing water plays the still-water frames, carried along with the flow at this many px per step
+-- (0 = the river's own generated pattern). Whole numbers only, so the 128-step loop closes without a jump.
+FLOW_STILL = 1
+-- TRIAL: on flowing water the pattern itself changes this many still-water frames per step (1 = as on the pond),
+-- so its own shimmer is not drowned out by the drift. Whole numbers only.
+FLOW_ANIM = 2
+-- TRIAL: where two flow directions meet, the tiles on both sides of the border show both directions' patterns
+-- together, each one step fainter, so lines fade across the border instead of being cut off at it.
+FLOW_FADE = true
 state = state or {}
 state.sets = state.sets or {}            -- frame sets keyed by flow direction
 state.stats = state.stats or {n=0, us=0}
@@ -121,12 +130,34 @@ local function load_still()
     end
     return still_data
 end
-local function build_still_frame(data, o)
+local function build_still_frame(data, o, ox, oy)
+    ox, oy = ox or 0, oy or 0
     local pix, base, col = {}, o * N * N, {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS, STILL_SHADOW, RING_COLS[1], RING_COLS[2], RING_COLS[3], RING_COLS[4], RING_COLS[5], RING_COLS[6]}
     for y = 0, N - 1 do
-        local row = {data:byte(base + y * N + 1, base + y * N + N)}
+        local sy = (y - oy) % N
+        local row = {data:byte(base + sy * N + 1, base + sy * N + N)}
         local at = y * N
-        for x = 1, N do pix[at + x] = col[row[x]] or 0 end
+        for x = 1, N do pix[at + x] = col[row[(x - 1 - ox) % N + 1]] or 0 end
+    end
+    return dfhack.textures.createTileset(pix, N, N, TP, TP)
+end
+
+-- Border between two flow directions: both patterns, each one step fainter (white -> line -> very faint -> off).
+local DIMMED = {[0] = 0, 4, 1, 1, 0, 1, 0}
+local RANK = {[0] = 0, 2, 3, 4, 1, 3, 0}
+local function build_mix_frame(data, o, da, db)
+    local pix, base = {}, (o * FLOW_ANIM % STEPS) * N * N
+    local col = {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS, STILL_SHADOW}
+    local ax, ay, bx, by = da[1] * FLOW_STILL * o, da[2] * FLOW_STILL * o, db[1] * FLOW_STILL * o, db[2] * FLOW_STILL * o
+    for y = 0, N - 1 do
+        local sa, sb = (y - ay) % N, (y - by) % N
+        local ra = {data:byte(base + sa * N + 1, base + sa * N + N)}
+        local rb = {data:byte(base + sb * N + 1, base + sb * N + N)}
+        local at = y * N
+        for x = 1, N do
+            local a, b = DIMMED[ra[(x - 1 - ax) % N + 1]] or 0, DIMMED[rb[(x - 1 - bx) % N + 1]] or 0
+            pix[at + x] = col[RANK[a] >= RANK[b] and a or b]
+        end
     end
     return dfhack.textures.createTileset(pix, N, N, TP, TP)
 end
@@ -190,6 +221,16 @@ local function build_frame(dir, o)
     if not DIRS[dir] then
         local data = load_still()
         if data then return build_still_frame(data, o) end
+    end
+    local da, db = dir:match('^(%a+)%+(%a+)$')
+    if da then
+        local data = load_still()
+        if data then return build_mix_frame(data, o, DIRS[da], DIRS[db]) end
+        dir = da
+    end
+    if DIRS[dir] and FLOW_STILL > 0 then
+        local data = load_still()
+        if data then return build_still_frame(data, o * FLOW_ANIM % STEPS, DIRS[dir][1] * FLOW_STILL * o, DIRS[dir][2] * FLOW_STILL * o) end
     end
     webs = webs or load_fields()
     local A, B = webs[1], webs[2]
@@ -320,10 +361,11 @@ local function water_map(vp)
     local getFlags, getType, getBlock = dfhack.maps.getTileFlags, dfhack.maps.getTileType, dfhack.maps.getTileBlock
     local attrs, OPEN, RAMP_TOP = df.tiletype.attrs, df.tiletype_shape.EMPTY, df.tiletype_shape.RAMP_TOP
     local names = df.tile_liquid_flow_dir
-    local W = vp.x2 - vp.x1 + 1 + 2 * SMOOTH
+    local M = SMOOTH + 1
+    local W = vp.x2 - vp.x1 + 1 + 2 * M
     local fx, fy, water = {}, {}, {}
-    for y = vp.y1 - SMOOTH, vp.y2 + SMOOTH do
-        for x = vp.x1 - SMOOTH, vp.x2 + SMOOTH do
+    for y = vp.y1 - M, vp.y2 + M do
+        for x = vp.x1 - M, vp.x2 + M do
             for z = z0, math.max(0, z0 - 4), -1 do
                 local d, occ = getFlags(x, y, z)
                 if not d or d.hidden then break end
@@ -331,7 +373,7 @@ local function water_map(vp)
                 if occ.building ~= 0 then break end
                 if d.flow_size > 0 then
                     if not d.liquid_type then  -- false = water
-                        local k = (y - vp.y1 + SMOOTH) * W + (x - vp.x1 + SMOOTH)
+                        local k = (y - vp.y1 + M) * W + (x - vp.x1 + M)
                         local b = getBlock(x, y, z)
                         local v = b and DIRS[names[b.liquid_flow[x % 16][y % 16].perm_flow_dir]]
                         -- 1 = flowing, 2 = still, 3 = creature in the tile (leave it unlit)
@@ -350,14 +392,14 @@ local function water_map(vp)
             end
         end
     end
-    local list = {}
-    for y = vp.y1, vp.y2 do
-        for x = vp.x1, vp.x2 do
-            local cy, cx = y - vp.y1 + SMOOTH, x - vp.x1 + SMOOTH
+    local dm = {}
+    for y = vp.y1 - 1, vp.y2 + 1 do
+        for x = vp.x1 - 1, vp.x2 + 1 do
+            local cy, cx = y - vp.y1 + M, x - vp.x1 + M
             local kind = water[cy * W + cx]
             if kind == 2 then
                 -- still water (ponds, pools) never borrows a neighbouring river's drift
-                list[#list + 1] = {x, y, 'none'}
+                dm[cy * W + cx] = 'none'
             elseif kind == 1 then
                 local sx, sy = 0, 0
                 for yy = cy - SMOOTH, cy + SMOOTH do
@@ -371,7 +413,25 @@ local function water_map(vp)
                 if sx * sx + sy * sy > 0.25 then
                     dir = OCT[math.floor(math.atan(sy, sx) / (math.pi / 4) + 0.5) % 8]
                 end
-                list[#list + 1] = {x, y, dir}
+                dm[cy * W + cx] = dir
+            end
+        end
+    end
+    local list = {}
+    local fade = FLOW_FADE and FLOW_STILL > 0
+    local NB = {-W - 1, -W, -W + 1, -1, 1, W - 1, W, W + 1}
+    for y = vp.y1, vp.y2 do
+        for x = vp.x1, vp.x2 do
+            local at = (y - vp.y1 + M) * W + (x - vp.x1 + M)
+            local d = dm[at]
+            if d then
+                if fade and DIRS[d] then
+                    for i = 1, 8 do
+                        local nd = dm[at + NB[i]]
+                        if nd and nd ~= d and DIRS[nd] then d = d < nd and d .. '+' .. nd or nd .. '+' .. d; break end
+                    end
+                end
+                list[#list + 1] = {x, y, d}
             end
         end
     end
