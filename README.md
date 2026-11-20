@@ -9,13 +9,19 @@
 
 `tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
 
-Current still water: taken from a seamless grayscale caustics picture (not in this repo; the bake used
-`~/Downloads/Milky grayscale water caustics texture.png`). The picture is shrunk to 128x128 px, its lines
-are sharpened, and a smooth 3 px displacement that loops over the 128 frames makes the net flex in place.
-Levels by brightness: 4 very faint halo, 1 line, 5 white knots. No shadow in this version.
+Current still water: taken from a 128-frame looping grayscale caustics animation (not in this repo; the
+bake used `~/Downloads/water_caustics_128_frames.gif`, 768x768, 80 ms per frame). Its frames are used one
+for one. It loops in time but does not tile in space, so a 96 px band along two edges is cross-faded into
+the opposite edges before each frame is shrunk to 128x128 px. Levels by brightness: 4 very faint halo,
+1 line, 5 white knots. No shadow.
+
+    python fromgif.py <animation.gif> caustics_still.bin 96 72,82,96.5   # blend band px, halo/line/white percentiles
+    python rings2.py caustics_still.bin caustics_rings.bin 4
+
+Also tried: the tileable variant `water_caustics_tileable_128_frames.gif` (band 0; liked less), and a
+single seamless picture bent by a looping 3 px wobble (commit 5dba3c2):
 
     python fromimg.py <picture> caustics_still.bin 3 72,82,96.5   # wobble px, halo/line/white percentiles
-    python rings2.py caustics_still.bin caustics_rings.bin 4
 
 Trials kept as tools, not installed: `net2.py` (generated net of rounded pebbles with curved borders,
 shadow as level 6 = `STILL_SHADOW` in the script, e.g. `net2.py out.bin 4 30 2.6 0.56 7 4 0.86`) and
