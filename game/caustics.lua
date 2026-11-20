@@ -50,9 +50,12 @@ FLOW_ANIM = 2
 FLOW_FADE = true
 -- TRIAL: true = on those border tiles each pattern is one step fainter; false = both at full strength.
 FLOW_FADE_DIM = false
+-- true = the water stands still while the game is paused and carries on from the same frame after.
+PAUSE_FREEZE = true
 state = state or {}
 state.sets = state.sets or {}            -- frame sets keyed by flow direction
 state.stats = state.stats or {n=0, us=0}
+state.clock = state.clock or dfhack.getTickCount()   -- ms of animation time
 
 -- df.tile_liquid_flow_dir -> screen vector (north is y-1)
 local DIRS = {
@@ -458,7 +461,15 @@ function CausticsOverlay:onRenderFrame()
     local vp = guidm.Viewport.get()
     local list = water_map(vp)
     if #list == 0 then return end
-    local now = dfhack.getTickCount()
+    -- animation clock: real time, minus the time spent paused
+    local real = dfhack.getTickCount()
+    local paused = PAUSE_FREEZE and df.global.pause_state
+    if state.real and not paused then
+        local d = real - state.real
+        if d > 0 and d < 1000 then state.clock = state.clock + d end   -- a long gap (load, hang) does not jump the water
+    end
+    state.real = real
+    local now = state.clock
     local t_flow = math.floor(now / river_step_ms()) % STEPS
     local step_still = math.floor(now / STILL_MS)
     local t_still = step_still % STEPS
