@@ -25,7 +25,7 @@ for s in range(slots):
             ring = np.abs(np.hypot(X - cx, Y - cy) - r) < 0.62
             level = 3 if a < 2 else 2 if u < 0.5 else 1
             if u > 0.8: ring &= ((X + Y + a) % 2 == 0)
-            f[ring] = np.maximum(np.where(f[ring] == 4, 0, f[ring]), level)   # 4 = very faint, below everything
+            f[ring] = np.maximum(np.where((f[ring] == 4) | (f[ring] == 6), 0, f[ring]), level)   # 4 very faint and 6 shadow sit below a ring
             body.append(f)
 ev = slots * 16
 open(sys.argv[2], 'wb').write(bytes([ev, LIFE] + head) + np.stack(body).tobytes())
