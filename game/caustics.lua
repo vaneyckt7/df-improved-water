@@ -77,7 +77,7 @@ SEA_SHORE = true
 SHORE_MAX, SHORE_MID, SHORE_GAP, SHORE_SPEED, SHORE_BAND = 2, 1, 6, 0.6, 3.3
 SHORE_BEACH = true
 -- at most this many foam frame sets (about 8 MB each); past it, coasts at new angles use the straight set
-SHORE_SETS = 32
+SHORE_SETS = 40
 -- how far the wave front runs into the last land tile before it stops and the foam thins away in place,
 -- as tiles past that tile's seaward edge plus 0.5 (1.3 = four fifths of the way across it)
 SHORE_RUN = 1.3
@@ -311,11 +311,15 @@ end
 -- mirrored and leaned like the swell. The band is cut out of the still-water pattern, which stays where it
 -- is on the map, so sets for different headings and leans join up.
 local SHORE_X0 = 100
-local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb)
+local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb, wane)
     local pix = {}
     -- sand: for land tiles; the dense foam reaches further back, so the sheet on the sand stays wide.
     -- ebb: for the tile where the wave stops. The front stays put inside the tile and o is how many px the
     -- wave would have travelled past it: the foam behind the front thins as if the band had moved on.
+    -- wane: the same for the land tile in front of that one (a tile nearer the sea), from the moment the
+    -- wave stops. Both thin fastest at the stop line and slowest toward the sea, so the sheet dries from its
+    -- inland edge and the last foam lies at the water's edge, not stranded behind a strip of bare sand.
+    ebb = ebb or wane
     beach = beach or sand or ebb
     local z1, z2, z3, z4 = 22, 34, 62, 86
     if sand or ebb then z1, z2, z3, z4 = 32, 48, 72, 92 end
@@ -331,6 +335,7 @@ local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb)
         b = math.floor(b * a + SHORE_WATER[3] * (1 - a) + 0.5)
         return 0xFF000000 | b << 16 | g << 8 | r
     end
+    local wet = 0xFF000000 | SHORE_WATER[3] << 16 | SHORE_WATER[2] << 8 | SHORE_WATER[1]
     local turned, flipped = heading == 'north' or heading == 'south', heading == 'east' or heading == 'south'
     local rows = {}
     for r = 0, N - 1 do rows[r] = {data:byte(r * N + 1, r * N + N)} end
@@ -341,6 +346,7 @@ local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb)
     end
     local front = SHORE_X0 - o
     if ebb and (heading == 'east' or heading == 'south') then stop = stop - 1 end
+    if wane then stop = stop - TP end
     for y = 0, N - 1 do
         local at = y * N
         for x = 0, N - 1 do
@@ -354,7 +360,7 @@ local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb)
             local u = (along - front - wob[across]) % N
             if ebb then
                 u = along - (af - af % TP) - stop - wob[across]
-                u = u < 0 and N or u + o
+                u = u < 0 and N or u + o * math.max(0.4, 1.6 - u / 45)
             end
             local v = rows[y][x + 1]
             local line = v == 1 or v == 5
@@ -371,7 +377,15 @@ local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb)
             elseif g < z3 then c = v == 5 and 0xE0FFFFFF or v == 1 and 0xA8FFFFF8 or v == 4 and 0x50FFFFE8 or 0
             elseif g < z4 then c = v == 5 and 0xB0FFFFFF or v == 1 and 0x70FFFFF0 or 0
             elseif g < 104 then c = v == 5 and 0x70FFFFFF or v == 1 and 0x38FFFFE8 or 0 end
-            pix[at + x + 1] = beach and solid(c) or c
+            -- on land the wave's water still lies behind the front where the foam has thinned: sea colour
+            -- there instead of bare sand, fading out further back (and on the sea tiles beside land, where it
+            -- hides the ragged edge of the ground that the game draws into them)
+            if beach and c == 0 and u < 84 and (u < 60 or (84 - u) / 24 * 16 > BAYER[(y % 4) * 4 + x % 4] + 0.5) then
+                c = wet
+            else
+                c = beach and solid(c) or c
+            end
+            pix[at + x + 1] = c
         end
     end
     return dfhack.textures.createTileset(pix, N, N, TP, TP)
@@ -475,7 +489,7 @@ local function build_frame(dir, o)
     if sh then
         local data = load_still()
         if not data then return build_frame('none', o) end
-        return build_shore_frame(data, o, sh, lean ~= '' and tonumber(lean) / 2 or nil, far == 'far', far == 'beach', far == 'sand', far == 'ebb')
+        return build_shore_frame(data, o, sh, lean ~= '' and tonumber(lean) / 2 or nil, far == 'far', far == 'beach', far == 'sand', far == 'ebb', far == 'wane')
     end
     local sw, fade, slant = dir:match('^swell_(%a+)_?(%a*)([+-]?%d*)$')
     if sw then
@@ -873,7 +887,8 @@ local function shore_field(vp, z0)
                 'shore_' .. heading .. '_far' .. sl, 'shore_' .. heading, 'shore_' .. heading .. '_far',
                 'shore_' .. heading .. '_beach' .. sl, 'shore_' .. heading .. '_beach', heading == 'west' or heading == 'east', 1,
                 false, 'shore_' .. heading .. '_sand' .. sl, 'shore_' .. heading .. '_sand',
-                'shore_' .. heading .. '_ebb' .. sl, 'shore_' .. heading .. '_ebb'}
+                'shore_' .. heading .. '_ebb' .. sl, 'shore_' .. heading .. '_ebb', false, false,
+                'shore_' .. heading .. '_wane' .. sl, 'shore_' .. heading .. '_wane'}
     end
     -- how much nearer the coast line a tile is than its neighbour to the side (hx) or above/below (hy)
     local function land_step(e)
@@ -1372,10 +1387,14 @@ function CausticsOverlay:onRenderFrame()
         if la > SHORE_MAX then return end
         local name, alt, slide = nil, nil, true
         -- the land tile furthest in is where the wave stops: from then on it shows the thinning foam
-        local ebb = on and not e[19] and math.floor(TP * e[6] * rb - TP * (SHORE_RUN - 1) + 0.5)
+        -- (the land tile in front of it switches to its own thinning set, e[21], at the same moment: for
+        -- that tile the stop line is one tile further on)
+        local ebb = on and math.floor(TP * e[6] * rb - TP * (SHORE_RUN - 1) - (e[19] and TP or 0) + 0.5)
+        local halt, halt_alt = e[17], e[18]
+        if e[19] then halt, halt_alt = e[21], e[22] end
         if ebb and ebb >= 0 then
-            if ebb >= 112 then return end
-            name, alt, slide = e[17], e[18], false
+            if ebb >= (e[19] and STEPS or 112) then return end
+            name, alt, slide = halt, halt_alt, false
         elseif rb >= SHORE_BAND or rb * e[6] >= 2.9 then
             return
         elseif la > SHORE_MID then
@@ -1389,7 +1408,7 @@ function CausticsOverlay:onRenderFrame()
         end
         local function have(k) return state.sets[k] or state.partial[k] end
         -- (a land tile needs its sliding set and its thinning set at the same lean, or the front would kink)
-        if not have(name) or on and la <= SHORE_MID and not (have(e[15]) and have(e[17])) then
+        if not have(name) or on and la <= SHORE_MID and not (have(e[15]) and have(halt)) then
             local n = 0
             for k in pairs(state.sets) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
             for k in pairs(state.partial) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
@@ -1401,7 +1420,7 @@ function CausticsOverlay:onRenderFrame()
             budget = bake_some(name, budget)
             set = state.sets[name]
         end
-        if on and budget > 0 and not state.sets[e[17]] and name == e[15] then budget = bake_some(e[17], budget) end
+        if on and budget > 0 and not state.sets[halt] and name == e[15] then budget = bake_some(halt, budget) end
         if not set then return end
         local f = ebb
         if slide then
