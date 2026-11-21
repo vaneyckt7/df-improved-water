@@ -77,7 +77,9 @@ SEA_SHORE = true
 SHORE_MAX, SHORE_MID, SHORE_GAP, SHORE_SPEED, SHORE_BAND = 2, 1, 6, 0.6, 3.3
 SHORE_BEACH = true
 -- at most this many foam frame sets (about 8 MB each); past it, coasts at new angles use the straight set
-SHORE_SETS = 16
+SHORE_SETS = 24
+SHORE_RUN = 1.3     -- how far past the water's edge a wave runs before it stops and thins away, in tiles
+SHORE_WATER = {1, 78, 90}   -- the sea's colour (R, G, B) under the foam drawn on land
 LACE_COLS = {full = {[0] = 0xD8FFFFFF, 0x48FFFFF0, 0, 0, 0x98FFFFF8, 0},
              hi = {[0] = 0, 0xA0FFFFF0, 0, 0, 0x58FFFFD8, 0xE0FFFFFF},
              mid = {[0] = 0, 0x70FFFFF0, 0, 0, 0x28FFFFD8, 0xB0FFFFFF},
@@ -304,8 +306,19 @@ end
 -- mirrored and leaned like the swell. The band is cut out of the still-water pattern, which stays where it
 -- is on the map, so sets for different headings and leans join up.
 local SHORE_X0 = 100
-local function build_shore_frame(data, o, heading, lean, far)
+local function build_shore_frame(data, o, heading, lean, far, beach)
     local pix = {}
+    -- beach: for land tiles. Every drawn pixel is mixed with the water colour beforehand and made solid, so
+    -- the foam looks the same on sand as on the sea instead of letting the ground tint it.
+    local function solid(c)
+        if c == 0 then return 0 end
+        local a = (c >> 24) / 255
+        local r, g, b = c & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff
+        r = math.floor(r * a + SHORE_WATER[1] * (1 - a) + 0.5)
+        g = math.floor(g * a + SHORE_WATER[2] * (1 - a) + 0.5)
+        b = math.floor(b * a + SHORE_WATER[3] * (1 - a) + 0.5)
+        return 0xFF000000 | b << 16 | g << 8 | r
+    end
     local turned, flipped = heading == 'north' or heading == 'south', heading == 'east' or heading == 'south'
     local rows = {}
     for r = 0, N - 1 do rows[r] = {data:byte(r * N + 1, r * N + N)} end
@@ -338,7 +351,7 @@ local function build_shore_frame(data, o, heading, lean, far)
             elseif g < 62 then c = v == 5 and 0xE0FFFFFF or v == 1 and 0xA8FFFFF8 or v == 4 and 0x50FFFFE8 or 0
             elseif g < 86 then c = v == 5 and 0xB0FFFFFF or v == 1 and 0x70FFFFF0 or 0
             elseif g < 104 then c = v == 5 and 0x70FFFFFF or v == 1 and 0x38FFFFE8 or 0 end
-            pix[at + x + 1] = c
+            pix[at + x + 1] = beach and solid(c) or c
         end
     end
     return dfhack.textures.createTileset(pix, N, N, TP, TP)
@@ -442,7 +455,7 @@ local function build_frame(dir, o)
     if sh then
         local data = load_still()
         if not data then return build_frame('none', o) end
-        return build_shore_frame(data, o, sh, lean ~= '' and tonumber(lean) / 2 or nil, far == 'far')
+        return build_shore_frame(data, o, sh, lean ~= '' and tonumber(lean) / 2 or nil, far == 'far', far == 'beach')
     end
     local sw, fade, slant = dir:match('^swell_(%a+)_?(%a*)([+-]?%d*)$')
     if sw then
@@ -704,7 +717,7 @@ local function shore_field(vp, z0)
     local xo, yo, zl = vp.x1 - M, vp.y1 - M, math.max(0, z0 - 4)
     -- 1 = sea, 0 = land, nil = unknown (off the map, hidden, fresh water, nothing within 5 levels)
     local kind, BIG = {}, 1e9
-    local floor, FLOOR = {}, df.tiletype_shape.FLOOR
+    local floor, FLOOR, PEBBLES = {}, df.tiletype_shape.FLOOR, df.tiletype_shape.PEBBLES
     local ox, oy, d2 = {}, {}, {}
     local any = false
     for cy = 0, H - 1 do
@@ -722,7 +735,7 @@ local function shore_field(vp, z0)
                 local sh = attrs[tt].shape
                 if sh ~= OPEN and sh ~= RAMP_TOP then
                     v = 0
-                    floor[cy * W + cx] = z == z0 and sh == FLOOR or nil
+                    floor[cy * W + cx] = z == z0 and (sh == FLOOR or sh == PEBBLES) or nil
                     break
                 end
             end
@@ -772,7 +785,7 @@ local function shore_field(vp, z0)
             sm[cy * W + cx] = n > 0 and s / n or false
         end
     end
-    local t, beach = c.t, {}
+    local t, beach, ring1 = c.t, {}, {}
     c.beach = beach
     local function entry(x, y, k, b, least)
         local l, r, u, dn = sm[k - 1], sm[k + 1], sm[k - W], sm[k + W]
@@ -794,7 +807,8 @@ local function shore_field(vp, z0)
         local inv = 1 / math.abs(along)
         local sl = slant ~= 0 and ('%+d'):format(slant) or ''
         return {b, 'shore_' .. heading .. sl, mid, (along > 0 and 1 or -1) * TP * inv, along > 0, inv,
-                'shore_' .. heading .. '_far' .. sl, 'shore_' .. heading, 'shore_' .. heading .. '_far'}
+                'shore_' .. heading .. '_far' .. sl, 'shore_' .. heading, 'shore_' .. heading .. '_far',
+                'shore_' .. heading .. '_beach' .. sl, 'shore_' .. heading .. '_beach', heading == 'west' or heading == 'east', 1}
     end
     for y = vp.y1, vp.y2 do
         for x = vp.x1, vp.x2 do
@@ -802,7 +816,14 @@ local function shore_field(vp, z0)
             local k = cy * W + cx
             local b = sm[k]
             if kind[k] == 1 and b and b <= SHORE_MAX + SHORE_BAND + 2 then
-                t[y * 8192 + x] = entry(x, y, k, b, 0.3)
+                local e = entry(x, y, k, b, 0.3)
+                -- beside land the game draws the ragged edge of the ground into the sea tile, and see-through
+                -- foam lets it show as a sand-coloured line: these tiles take the solid foam of the beach
+                if e and SHORE_BEACH and (kind[k - 1] == 0 or kind[k + 1] == 0 or kind[k - W] == 0 or kind[k + W] == 0
+                        or kind[k - W - 1] == 0 or kind[k - W + 1] == 0 or kind[k + W - 1] == 0 or kind[k + W + 1] == 0) then
+                    e[14] = true
+                end
+                t[y * 8192 + x] = e
             elseif SHORE_BEACH and floor[k] and (kind[k - 1] == 1 or kind[k + 1] == 1 or kind[k - W] == 1 or kind[k + W] == 1) then
                 -- one tile further in than the nearest sea tile beside it
                 local b = math.huge
@@ -811,7 +832,27 @@ local function shore_field(vp, z0)
                 if kind[k - W] == 1 then b = math.min(b, sm[k - W] or b) end
                 if kind[k + W] == 1 then b = math.min(b, sm[k + W] or b) end
                 local e = b < math.huge and entry(x, y, k, b - 1, 0.02)
-                if e then beach[#beach + 1] = {x, y, e} end
+                if e then beach[#beach + 1] = {x, y, e}; ring1[k] = e end
+            end
+        end
+    end
+    -- a second row of land behind the first: the same wave as the tile in front of it, one tile further in
+    if SHORE_BEACH and SHORE_RUN > 0.8 then
+        for y = vp.y1, vp.y2 do
+            for x = vp.x1, vp.x2 do
+                local k = (y - yo) * W + x - xo
+                if floor[k] and not ring1[k] then
+                    local n
+                    for _, o in ipairs{-1, 1, -W, W} do
+                        local e = ring1[k + o]
+                        if e and (not n or e[1] < n[1]) then n = e end
+                    end
+                    if n then
+                        local e = {table.unpack(n)}
+                        e[1], e[3], e[13] = n[1] - 1, ((n[12] and x or y) + 0.5) * TP, 2
+                        beach[#beach + 1] = {x, y, e}
+                    end
+                end
             end
         end
     end
@@ -1238,18 +1279,18 @@ function CausticsOverlay:onRenderFrame()
         -- (the band texture repeats every 4 tiles along its travel axis: stay clear of the next copy)
         if rb >= SHORE_BAND or rb * e[6] >= 2.9 or la > SHORE_MAX then return end
         local name, slide = nil, true
-        if la > -0.6 then
+        if la > -SHORE_RUN then
             local far = la > SHORE_MID
-            name = far and e[7] or e[2]
+            name = far and e[7] or (on or e[14]) and e[10] or e[2]
             if not state.sets[name] and not state.partial[name] then
                 local n = 0
                 for k in pairs(state.sets) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
                 for k in pairs(state.partial) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
-                if n >= SHORE_SETS then name = far and e[9] or e[8] end
+                if n >= SHORE_SETS then name = far and e[9] or (on or e[14]) and e[11] or e[8] end
             end
-        elseif not on and la > -2.2 then
-            -- the wave has run out: what is left of its lace thins away
-            name, slide = la > -1.4 and 'lace_mid' or 'lace_lo', false
+        elseif la > -SHORE_RUN - 1.6 then
+            -- the wave has run out: what is left of its lace thins away (thinner from the start further up the sand)
+            name, slide = (la > -SHORE_RUN - 0.8 and e[13] ~= 2) and 'lace_mid' or 'lace_lo', false
         end
         if not name then return end
         local set = state.sets[name]

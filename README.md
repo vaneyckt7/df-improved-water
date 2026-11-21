@@ -20,8 +20,10 @@ marks the tile behind each game wave with an arrow (`overlay enable wavetiles.sh
 Shore surf (`SEA_SHORE`, on by default; overrides the wave-following foam above): every sea tile near land
 knows its distance to the coast, and a band of white foam cut from the still-water pattern is drawn where
 that distance equals a value shrinking over time. It appears faint `SHORE_MAX` tiles out, turns to full
-foam `SHORE_MID` tiles out, runs onto the land tiles at the water's edge (`SHORE_BEACH`) and leaves lace
-that thins away in place. Still in the script but switched off or overridden: `SEA_ONTILE` (a crescent per
+foam `SHORE_MID` tiles out, runs `SHORE_RUN` tiles up the land (`SHORE_BEACH`: two rows of floor or pebble
+tiles on the viewed level) and leaves lace that thins away in place. On land, and on sea tiles touching
+land, the foam is drawn solid with the sea colour (`SHORE_WATER`) mixed in beforehand, so neither the ground
+nor the game's ragged shoreline edge shows through it. Still in the script but switched off or overridden: `SEA_ONTILE` (a crescent per
 game wave, `caustics_wavetile.bin` from `tools/wavetile.py`) and `SEA_TILED` (`caustics_sea_crescent.bin` /
 `caustics_sea_line.bin` from `tools/seagif.py`).
 
