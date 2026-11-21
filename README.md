@@ -25,7 +25,10 @@ viewed level). In the last land row the front stops part-way across the tile (`S
 behind it thins away where it lies (`_ebb` frame sets); on land the dense foam reaches further back
 (`_sand` sets) so the sheet on the sand stays wide. On land, and on sea tiles touching
 land, the foam is drawn solid with the sea colour (`SHORE_WATER`) mixed in beforehand, so neither the ground
-nor the game's ragged shoreline edge shows through it. Still in the script but switched off or overridden: `SEA_ONTILE` (a crescent per
+nor the game's ragged shoreline edge shows through it. Before the distances are worked out the land is
+grown and shrunk by `SHORE_CLOSE` tiles, so notches and narrow channels do not each bend the foam their own
+way (they stay calm past two tiles in). A land tile's distance inland follows the coast's angle there, so
+on a diagonal coast the foam on the sand ends in one slanted line. Still in the script but switched off or overridden: `SEA_ONTILE` (a crescent per
 game wave, `caustics_wavetile.bin` from `tools/wavetile.py`) and `SEA_TILED` (`caustics_sea_crescent.bin` /
 `caustics_sea_line.bin` from `tools/seagif.py`).
 

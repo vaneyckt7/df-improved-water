@@ -81,6 +81,9 @@ SHORE_SETS = 32
 -- how far the wave front runs into the last land tile before it stops and the foam thins away in place,
 -- as tiles past that tile's seaward edge plus 0.5 (1.3 = four fifths of the way across it)
 SHORE_RUN = 1.3
+-- Tiles the land is grown and shrunk by before the wave's path is worked out, so that small notches and
+-- channels in the coast do not each bend the foam their own way (0 = follow every tile).
+SHORE_CLOSE = 2
 SHORE_WATER = {1, 78, 90}   -- the sea's colour (R, G, B) under the foam drawn on land
 LACE_COLS = {full = {[0] = 0xD8FFFFFF, 0x48FFFFF0, 0, 0, 0x98FFFFF8, 0},
              hi = {[0] = 0, 0xA0FFFFF0, 0, 0, 0x58FFFFD8, 0xE0FFFFFF},
@@ -729,7 +732,7 @@ local function shore_field(vp, z0)
     state.shore = c
     local getFlags, getType = dfhack.maps.getTileFlags, dfhack.maps.getTileType
     local attrs, OPEN, RAMP_TOP = df.tiletype.attrs, df.tiletype_shape.EMPTY, df.tiletype_shape.RAMP_TOP
-    local M = math.ceil(SHORE_MAX + SHORE_BAND) + 3
+    local M = math.ceil(SHORE_MAX + SHORE_BAND) + 3 + 2 * SHORE_CLOSE
     local W, H = vp.x2 - vp.x1 + 1 + 2 * M, vp.y2 - vp.y1 + 1 + 2 * M
     local xo, yo, zl = vp.x1 - M, vp.y1 - M, math.max(0, z0 - 4)
     -- 1 = sea, 0 = land, nil = unknown (off the map, hidden, fresh water, nothing within 5 levels)
@@ -762,6 +765,49 @@ local function shore_field(vp, z0)
         end
     end
     if not any then return c end
+    -- The wave follows a simplified coast: notches and channels up to 2 * SHORE_CLOSE tiles wide (about
+    -- twice that when they run diagonally) are closed
+    -- (land grown by SHORE_CLOSE tiles, then shrunk again). Their water (fill) counts as beach.
+    local fill = {}
+    if SHORE_CLOSE > 0 then
+        local R = SHORE_CLOSE
+        local function pass(src, all, edge)
+            -- per cell: is any (all = false) or every (all = true) cell within R along rows, then columns, set?
+            local a, b = {}, {}
+            for cy = 0, H - 1 do
+                for cx = 0, W - 1 do
+                    local v = all
+                    for xx = cx - R, cx + R do
+                        local q = edge
+                        if xx >= 0 and xx < W then q = src[cy * W + xx] end
+                        if all then v = v and q else v = v or q end
+                    end
+                    a[cy * W + cx] = v or false
+                end
+            end
+            for cy = 0, H - 1 do
+                for cx = 0, W - 1 do
+                    local v = all
+                    for yy = cy - R, cy + R do
+                        local q = edge
+                        if yy >= 0 and yy < H then q = a[yy * W + cx] end
+                        if all then v = v and q else v = v or q end
+                    end
+                    b[cy * W + cx] = v or false
+                end
+            end
+            return b
+        end
+        local land = {}
+        for k = 0, W * H - 1 do land[k] = kind[k] == 0 end
+        local closed = pass(pass(land, false, false), true, true)
+        for k = 0, W * H - 1 do
+            if closed[k] and kind[k] == 1 then
+                fill[k], kind[k] = true, 0
+                ox[k], oy[k], d2[k] = 0, 0, 0
+            end
+        end
+    end
     -- nearest land tile for every cell: two sweeps passing the offset to it along (8SSEDT)
     local function try(k, cx, cy, nx, ny)
         local ncx, ncy = cx + nx, cy + ny
@@ -829,6 +875,13 @@ local function shore_field(vp, z0)
                 false, 'shore_' .. heading .. '_sand' .. sl, 'shore_' .. heading .. '_sand',
                 'shore_' .. heading .. '_ebb' .. sl, 'shore_' .. heading .. '_ebb'}
     end
+    -- how much nearer the coast line a tile is than its neighbour to the side (hx) or above/below (hy)
+    local function land_step(e)
+        local a = 1 / e[6]
+        local c = math.sqrt(math.max(0, 1 - a * a))
+        if e[12] then return a, c end
+        return c, a
+    end
     for y = vp.y1, vp.y2 do
         for x = vp.x1, vp.x2 do
             local cx, cy = x - xo, y - yo
@@ -843,15 +896,23 @@ local function shore_field(vp, z0)
                     e[14] = true
                 end
                 t[y * 8192 + x] = e
-            elseif SHORE_BEACH and floor[k] and (kind[k - 1] == 1 or kind[k + 1] == 1 or kind[k - W] == 1 or kind[k + W] == 1) then
-                -- one tile further in than the nearest sea tile beside it
+            elseif SHORE_BEACH and (floor[k] or fill[k]) and (kind[k - 1] == 1 or kind[k + 1] == 1 or kind[k - W] == 1 or kind[k + W] == 1) then
+                -- further in than the sea tile beside it by one tile measured along the wave's path: a full
+                -- tile where the wave comes straight at that side, less where the coast runs diagonally
+                local e = entry(x, y, k, 0, 0.02)
                 local b = math.huge
-                if kind[k - 1] == 1 then b = math.min(b, sm[k - 1] or b) end
-                if kind[k + 1] == 1 then b = math.min(b, sm[k + 1] or b) end
-                if kind[k - W] == 1 then b = math.min(b, sm[k - W] or b) end
-                if kind[k + W] == 1 then b = math.min(b, sm[k + W] or b) end
-                local e = b < math.huge and entry(x, y, k, b - 1, 0.02)
-                if e then beach[#beach + 1] = {x, y, e}; ring1[k] = e end
+                if e then
+                    local hx, hy = land_step(e)
+                    if kind[k - 1] == 1 and sm[k - 1] then b = math.min(b, sm[k - 1] - hx) end
+                    if kind[k + 1] == 1 and sm[k + 1] then b = math.min(b, sm[k + 1] - hx) end
+                    if kind[k - W] == 1 and sm[k - W] then b = math.min(b, sm[k - W] - hy) end
+                    if kind[k + W] == 1 and sm[k + W] then b = math.min(b, sm[k + W] - hy) end
+                    e[1] = b
+                end
+                if e and b < math.huge then
+                    beach[#beach + 1] = {x, y, e, fill[k]}; ring1[k] = e
+                    if fill[k] then e[20] = true; t[y * 8192 + x] = e end
+                end
             end
         end
     end
@@ -860,17 +921,19 @@ local function shore_field(vp, z0)
         for y = vp.y1, vp.y2 do
             for x = vp.x1, vp.x2 do
                 local k = (y - yo) * W + x - xo
-                if floor[k] and not ring1[k] then
-                    local n
+                if (floor[k] or fill[k]) and not ring1[k] then
+                    local n, step
                     for _, o in ipairs{-1, 1, -W, W} do
                         local e = ring1[k + o]
-                        if e and (not n or e[1] < n[1]) then n = e end
+                        if e and (not n or e[1] < n[1]) then n, step = e, o end
                     end
                     if n then
                         local e = {table.unpack(n, 1, 18)}
-                        e[1], e[3], e[13] = n[1] - 1, ((n[12] and x or y) + 0.5) * TP, 2
-                        beach[#beach + 1] = {x, y, e}
+                        local hx, hy = land_step(n)
+                        e[1], e[3], e[13] = n[1] - ((step == 1 or step == -1) and hx or hy), ((n[12] and x or y) + 0.5) * TP, 2
+                        beach[#beach + 1] = {x, y, e, fill[k]}
                         ring2[k] = true
+                        if fill[k] then e[20] = true; t[y * 8192 + x] = e end
                     end
                 end
             end
@@ -1359,7 +1422,7 @@ function CausticsOverlay:onRenderFrame()
         elseif key == 'sea' then
             local x, y = p[1], p[2]
             local e = shore and shore[y * 8192 + x]
-            local ft = e and shore_tex(e, x, y)
+            local ft = e and shore_tex(e, x, y, e[20])
             if ft then
                 foam = ft
                 if not (under and SEA_CAUSTICS) then
@@ -1455,7 +1518,7 @@ function CausticsOverlay:onRenderFrame()
     if beach then
         for i = 1, #beach do
             local b = beach[i]
-            local tex = shore_tex(b[3], b[1], b[2], true)
+            local tex = not b[4] and shore_tex(b[3], b[1], b[2], true)
             if tex then paint(pen, b[1] - x1, b[2] - y1, nil, tex, true) end
         end
     end
