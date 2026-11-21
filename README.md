@@ -20,11 +20,14 @@ marks the tile behind each game wave with an arrow (`overlay enable wavetiles.sh
 Shore surf (`SEA_SHORE`, on by default; overrides the wave-following foam above): every sea tile near land
 knows its distance to the coast, and a band of white foam cut from the still-water pattern is drawn where
 that distance equals a value shrinking over time. It appears faint `SHORE_MAX` tiles out, turns to full
-foam `SHORE_MID` tiles out and runs up the land (`SHORE_BEACH`: two rows of floor or pebble tiles on the
-viewed level). In the last land row the front stops part-way across the tile (`SHORE_RUN`) and the foam
-behind it thins away where it lies (`_ebb` frame sets). From that moment the land row in front of it stops
-sliding too and thins in place (`_wane` sets); both thin fastest at the stop line and slowest toward the
-sea, so the sheet dries from its inland edge and the last foam lies at the water's edge. On land the dense foam reaches further back
+foam `SHORE_MID` tiles out and runs up the land (`SHORE_BEACH`: floor or pebble tiles on the viewed level).
+The distance field is signed: positive at sea, negative on land, zero at the water's edge, smoothed over 3x3.
+The front stops where it equals `0.5 - SHORE_RUN` (`SHORE_RUN = 1`: half a tile onto the sand), so the stop
+line keeps one distance from the smoothed coast and rounds steps and corners instead of following tiles.
+Each land tile knows how many px that line lies landward of its centre (steps of 8) and, once the front gets
+there, shows a thinning set baked for that offset (`_ebba` .. `_ebbj` = -24 .. +48 px). The foam thins fastest
+at the stop line and slowest toward the sea, so the sheet dries from its inland edge and the last foam lies
+at the water's edge. On land the dense foam reaches further back
 (`_sand` sets) so the sheet on the sand stays wide. On land, and on sea tiles touching
 land, the foam is drawn solid with the sea colour (`SHORE_WATER`) mixed in beforehand, so neither the ground
 nor the game's ragged shoreline edge shows through it. Behind the front, where the foam has thinned, those

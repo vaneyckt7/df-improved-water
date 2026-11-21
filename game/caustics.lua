@@ -77,10 +77,11 @@ SEA_SHORE = true
 SHORE_MAX, SHORE_MID, SHORE_GAP, SHORE_SPEED, SHORE_BAND = 2, 1, 6, 0.6, 3.3
 SHORE_BEACH = true
 -- at most this many foam frame sets (about 8 MB each); past it, coasts at new angles use the straight set
-SHORE_SETS = 40
+SHORE_SETS = 56
 -- how far the wave front runs into the last land tile before it stops and the foam thins away in place,
--- as tiles past that tile's seaward edge plus 0.5 (1.3 = four fifths of the way across it)
-SHORE_RUN = 1.3
+-- as tiles past the water's edge plus 0.5 (1 = half a tile onto the land, 2 = a tile and a half). The stop line
+-- keeps that distance from the smoothed coast everywhere, so it rounds corners and steps instead of following tiles.
+SHORE_RUN = 1
 -- Tiles the land is grown and shrunk by before the wave's path is worked out, so that small notches and
 -- channels in the coast do not each bend the foam their own way (0 = follow every tile).
 SHORE_CLOSE = 2
@@ -311,19 +312,19 @@ end
 -- mirrored and leaned like the swell. The band is cut out of the still-water pattern, which stays where it
 -- is on the map, so sets for different headings and leans join up.
 local SHORE_X0 = 100
-local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb, wane)
+local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb)
     local pix = {}
     -- sand: for land tiles; the dense foam reaches further back, so the sheet on the sand stays wide.
     -- ebb: for the tile where the wave stops. The front stays put inside the tile and o is how many px the
     -- wave would have travelled past it: the foam behind the front thins as if the band had moved on.
-    -- wane: the same for the land tile in front of that one (a tile nearer the sea), from the moment the
-    -- wave stops. Both thin fastest at the stop line and slowest toward the sea, so the sheet dries from its
-    -- inland edge and the last foam lies at the water's edge, not stranded behind a strip of bare sand.
-    ebb = ebb or wane
+    -- ebb is a number: how many px the stop line lies landward of the tile's centre (negative: seaward; a
+    -- whole tile or more: the line is in a tile further in and this one is covered). The foam thins
+    -- fastest at the stop line and slowest toward the sea, so the sheet dries from its inland edge and the
+    -- last foam lies at the water's edge, not stranded behind a strip of bare sand.
     beach = beach or sand or ebb
     local z1, z2, z3, z4 = 22, 34, 62, 86
     if sand or ebb then z1, z2, z3, z4 = 32, 48, 72, 92 end
-    local stop = TP / 2 - TP * (SHORE_RUN - 1)
+    local stop = TP / 2 - (ebb or 0)
     -- beach: for land tiles. Every drawn pixel is mixed with the water colour beforehand and made solid, so
     -- the foam looks the same on sand as on the sea instead of letting the ground tint it.
     local function solid(c)
@@ -346,7 +347,6 @@ local function build_shore_frame(data, o, heading, lean, far, beach, sand, ebb, 
     end
     local front = SHORE_X0 - o
     if ebb and (heading == 'east' or heading == 'south') then stop = stop - 1 end
-    if wane then stop = stop - TP end
     for y = 0, N - 1 do
         local at = y * N
         for x = 0, N - 1 do
@@ -489,7 +489,7 @@ local function build_frame(dir, o)
     if sh then
         local data = load_still()
         if not data then return build_frame('none', o) end
-        return build_shore_frame(data, o, sh, lean ~= '' and tonumber(lean) / 2 or nil, far == 'far', far == 'beach', far == 'sand', far == 'ebb', far == 'wane')
+        return build_shore_frame(data, o, sh, lean ~= '' and tonumber(lean) / 2 or nil, far == 'far', far == 'beach', far == 'sand', far:match('^ebb%a$') and (far:byte(4) - 100) * 8)
     end
     local sw, fade, slant = dir:match('^swell_(%a+)_?(%a*)([+-]?%d*)$')
     if sw then
@@ -752,7 +752,6 @@ local function shore_field(vp, z0)
     -- 1 = sea, 0 = land, nil = unknown (off the map, hidden, fresh water, nothing within 5 levels)
     local kind, BIG = {}, 1e9
     local floor, FLOOR, PEBBLES = {}, df.tiletype_shape.FLOOR, df.tiletype_shape.PEBBLES
-    local ox, oy, d2 = {}, {}, {}
     local any = false
     for cy = 0, H - 1 do
         for cx = 0, W - 1 do
@@ -775,7 +774,7 @@ local function shore_field(vp, z0)
             end
             local k = cy * W + cx
             kind[k] = v
-            if v == 0 then ox[k], oy[k], d2[k], any = 0, 0, 0, true else d2[k] = BIG end
+            if v == 0 then any = true end
         end
     end
     if not any then return c end
@@ -818,36 +817,54 @@ local function shore_field(vp, z0)
         for k = 0, W * H - 1 do
             if closed[k] and kind[k] == 1 then
                 fill[k], kind[k] = true, 0
-                ox[k], oy[k], d2[k] = 0, 0, 0
             end
         end
     end
-    -- nearest land tile for every cell: two sweeps passing the offset to it along (8SSEDT)
-    local function try(k, cx, cy, nx, ny)
-        local ncx, ncy = cx + nx, cy + ny
-        if ncx < 0 or ncx >= W or ncy < 0 or ncy >= H then return end
-        local nk = ncy * W + ncx
-        if d2[nk] >= BIG then return end
-        local ax, ay = ox[nk] + nx, oy[nk] + ny
-        local dd = ax * ax + ay * ay
-        if dd < d2[k] then ox[k], oy[k], d2[k] = ax, ay, dd end
-    end
-    for cy = 0, H - 1 do
-        for cx = 0, W - 1 do
-            local k = cy * W + cx
-            try(k, cx, cy, -1, 0); try(k, cx, cy, 0, -1); try(k, cx, cy, -1, -1); try(k, cx, cy, 1, -1)
+    -- squared distance to the nearest seed cell for every cell: two sweeps passing the offset to it along (8SSEDT)
+    local function edt(seed)
+        local ox, oy, d2 = {}, {}, {}
+        for k = 0, W * H - 1 do
+            if seed(k) then ox[k], oy[k], d2[k] = 0, 0, 0 else d2[k] = BIG end
         end
-        for cx = W - 1, 0, -1 do try(cy * W + cx, cx, cy, 1, 0) end
-    end
-    for cy = H - 1, 0, -1 do
-        for cx = W - 1, 0, -1 do
-            local k = cy * W + cx
-            try(k, cx, cy, 1, 0); try(k, cx, cy, 0, 1); try(k, cx, cy, 1, 1); try(k, cx, cy, -1, 1)
+        local function try(k, cx, cy, nx, ny)
+            local ncx, ncy = cx + nx, cy + ny
+            if ncx < 0 or ncx >= W or ncy < 0 or ncy >= H then return end
+            local nk = ncy * W + ncx
+            if d2[nk] >= BIG then return end
+            local ax, ay = ox[nk] + nx, oy[nk] + ny
+            local dd = ax * ax + ay * ay
+            if dd < d2[k] then ox[k], oy[k], d2[k] = ax, ay, dd end
         end
-        for cx = 0, W - 1 do try(cy * W + cx, cx, cy, -1, 0) end
+        for cy = 0, H - 1 do
+            for cx = 0, W - 1 do
+                local k = cy * W + cx
+                try(k, cx, cy, -1, 0); try(k, cx, cy, 0, -1); try(k, cx, cy, -1, -1); try(k, cx, cy, 1, -1)
+            end
+            for cx = W - 1, 0, -1 do try(cy * W + cx, cx, cy, 1, 0) end
+        end
+        for cy = H - 1, 0, -1 do
+            for cx = W - 1, 0, -1 do
+                local k = cy * W + cx
+                try(k, cx, cy, 1, 0); try(k, cx, cy, 0, 1); try(k, cx, cy, 1, 1); try(k, cx, cy, -1, 1)
+            end
+            for cx = 0, W - 1 do try(cy * W + cx, cx, cy, -1, 0) end
+        end
+        return d2
     end
+    -- distance to the coast in tiles, 0 on the line between a land tile and a sea tile: positive at sea,
+    -- negative on land (to 4 tiles in), so the field runs on evenly across the water's edge
+    local d2 = edt(function(k) return kind[k] == 0 end)
+    local l2 = edt(function(k) return kind[k] == 1 end)
     local dist = {}
-    for k = 0, W * H - 1 do dist[k] = d2[k] < BIG and math.max(0, math.sqrt(d2[k]) - 0.5) or false end
+    for k = 0, W * H - 1 do
+        -- (a cell that is neither, fresh water or off the map, goes with whichever is nearer, so a pond
+        -- behind the beach is not taken for sea)
+        if kind[k] == 0 or kind[k] == nil and d2[k] < l2[k] then
+            dist[k] = l2[k] < BIG and -math.min(4, math.sqrt(l2[k]) - 0.5) or -4
+        else
+            dist[k] = d2[k] < BIG and math.max(0, math.sqrt(d2[k]) - 0.5) or false
+        end
+    end
     -- smoothed over 3x3 so a jagged beach does not put a jag in every line
     local sm = {}
     for cy = 1, H - 2 do
@@ -862,7 +879,8 @@ local function shore_field(vp, z0)
             sm[cy * W + cx] = n > 0 and s / n or false
         end
     end
-    local t, beach, ring1, ring2 = c.t, {}, {}, {}
+    local t, beach = c.t, {}
+    local run = SHORE_RUN - 0.5
     c.beach = beach
     local function entry(x, y, k, b, least)
         local l, r, u, dn = sm[k - 1], sm[k + 1], sm[k - W], sm[k + W]
@@ -887,15 +905,7 @@ local function shore_field(vp, z0)
                 'shore_' .. heading .. '_far' .. sl, 'shore_' .. heading, 'shore_' .. heading .. '_far',
                 'shore_' .. heading .. '_beach' .. sl, 'shore_' .. heading .. '_beach', heading == 'west' or heading == 'east', 1,
                 false, 'shore_' .. heading .. '_sand' .. sl, 'shore_' .. heading .. '_sand',
-                'shore_' .. heading .. '_ebb' .. sl, 'shore_' .. heading .. '_ebb', false, false,
-                'shore_' .. heading .. '_wane' .. sl, 'shore_' .. heading .. '_wane'}
-    end
-    -- how much nearer the coast line a tile is than its neighbour to the side (hx) or above/below (hy)
-    local function land_step(e)
-        local a = 1 / e[6]
-        local c = math.sqrt(math.max(0, 1 - a * a))
-        if e[12] then return a, c end
-        return c, a
+                false, false, 0, false, heading, sl}
     end
     for y = vp.y1, vp.y2 do
         for x = vp.x1, vp.x2 do
@@ -911,56 +921,20 @@ local function shore_field(vp, z0)
                     e[14] = true
                 end
                 t[y * 8192 + x] = e
-            elseif SHORE_BEACH and (floor[k] or fill[k]) and (kind[k - 1] == 1 or kind[k + 1] == 1 or kind[k - W] == 1 or kind[k + W] == 1) then
-                -- further in than the sea tile beside it by one tile measured along the wave's path: a full
-                -- tile where the wave comes straight at that side, less where the coast runs diagonally
-                local e = entry(x, y, k, 0, 0.02)
-                local b = math.huge
-                if e then
-                    local hx, hy = land_step(e)
-                    if kind[k - 1] == 1 and sm[k - 1] then b = math.min(b, sm[k - 1] - hx) end
-                    if kind[k + 1] == 1 and sm[k + 1] then b = math.min(b, sm[k + 1] - hx) end
-                    if kind[k - W] == 1 and sm[k - W] then b = math.min(b, sm[k - W] - hy) end
-                    if kind[k + W] == 1 and sm[k + W] then b = math.min(b, sm[k + W] - hy) end
-                    e[1] = b
-                end
-                if e and b < math.huge then
-                    beach[#beach + 1] = {x, y, e, fill[k]}; ring1[k] = e
+            elseif SHORE_BEACH and (floor[k] or fill[k]) and b and b > -(run + 1.6) and l2[k] <= (run + 1.6) ^ 2 then
+                -- land: the wave stops where the field equals -run. q: how many px along the wave's path
+                -- that line lies landward of this tile's centre, in steps of 8 (one thinning set per step;
+                -- the tile's distance is rounded to match, so the sliding front arrives exactly there)
+                local e = entry(x, y, k, b, 0.3)
+                local q = e and math.floor((b + run) * TP * e[6] / 8 + 0.5) * 8
+                if e and q >= -24 then
+                    e[1], e[19] = q / (TP * e[6]) - run, q
+                    local code = string.char(100 + math.min(6, q // 8))
+                    e[17], e[18] = 'shore_' .. e[21] .. '_ebb' .. code .. e[22], 'shore_' .. e[21] .. '_ebb' .. code
+                    beach[#beach + 1] = {x, y, e, fill[k]}
                     if fill[k] then e[20] = true; t[y * 8192 + x] = e end
                 end
             end
-        end
-    end
-    -- a second row of land behind the first: the same wave as the tile in front of it, one tile further in
-    if SHORE_BEACH and SHORE_RUN > 0.8 then
-        for y = vp.y1, vp.y2 do
-            for x = vp.x1, vp.x2 do
-                local k = (y - yo) * W + x - xo
-                if (floor[k] or fill[k]) and not ring1[k] then
-                    local n, step
-                    for _, o in ipairs{-1, 1, -W, W} do
-                        local e = ring1[k + o]
-                        if e and (not n or e[1] < n[1]) then n, step = e, o end
-                    end
-                    if n then
-                        local e = {table.unpack(n, 1, 18)}
-                        local hx, hy = land_step(n)
-                        e[1], e[3], e[13] = n[1] - ((step == 1 or step == -1) and hx or hy), ((n[12] and x or y) + 0.5) * TP, 2
-                        beach[#beach + 1] = {x, y, e, fill[k]}
-                        ring2[k] = true
-                        if fill[k] then e[20] = true; t[y * 8192 + x] = e end
-                    end
-                end
-            end
-        end
-    end
-    -- [19]: a first-row tile with a foam tile straight behind it lets the wave through; the others stop it
-    for i = 1, #beach do
-        local x, y, e = beach[i][1], beach[i][2], beach[i][3]
-        if e[13] == 1 then
-            local k = (y - yo) * W + x - xo
-            local kb = k + (e[12] and (e[5] and 1 or -1) or (e[5] and W or -W))
-            e[19] = (ring2[kb] or ring1[kb]) and true or false
         end
     end
     return c
@@ -1381,20 +1355,22 @@ function CausticsOverlay:onRenderFrame()
         -- rb: how far this tile is behind (seaward of) the front that last passed it, in tiles of distance
         -- to the coast; slightly negative when the next front is about to reach it
         local rb = (e[1] - shore_p) % SHORE_GAP
-        if rb > SHORE_GAP - 0.4 then rb = rb - SHORE_GAP end
+        if rb > SHORE_GAP - (on and 1 or 0.4) then rb = rb - SHORE_GAP end
+        local early = rb < -0.4
         local la = e[1] - rb
         -- (the band texture repeats every 4 tiles along its travel axis: stay clear of the next copy)
         if la > SHORE_MAX then return end
         local name, alt, slide = nil, nil, true
-        -- the land tile furthest in is where the wave stops: from then on it shows the thinning foam
-        -- (the land tile in front of it switches to its own thinning set, e[21], at the same moment: for
-        -- that tile the stop line is one tile further on)
-        local ebb = on and math.floor(TP * e[6] * rb - TP * (SHORE_RUN - 1) - (e[19] and TP or 0) + 0.5)
+        -- a land tile shows the thinning foam from the moment the front reaches the stop line (e[19] px
+        -- landward of the tile's centre)
+        local ebb = on and math.floor(TP * e[6] * rb + 0.5) - e[19]
         local halt, halt_alt = e[17], e[18]
-        if e[19] then halt, halt_alt = e[21], e[22] end
         if ebb and ebb >= 0 then
-            if ebb >= (e[19] and STEPS or 112) then return end
+            if ebb >= STEPS then return end
             name, alt, slide = halt, halt_alt, false
+        elseif early then
+            -- (the sliding set repeats: this early its far end would show ahead of the front)
+            return
         elseif rb >= SHORE_BAND or rb * e[6] >= 2.9 then
             return
         elseif la > SHORE_MID then
