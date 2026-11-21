@@ -17,6 +17,14 @@ viewport layer (`SEA_UNDER`) so both show. `caustics_swell.bin` holds 128 frames
 crest travelling west; the script mirrors, turns and slants it. `wavetiles.lua` is a debug overlay that
 marks the tile behind each game wave with an arrow (`overlay enable wavetiles.show`).
 
+Shore surf (`SEA_SHORE`, on by default; overrides the wave-following foam above): every sea tile near land
+knows its distance to the coast, and a band of white foam cut from the still-water pattern is drawn where
+that distance equals a value shrinking over time. It appears faint `SHORE_MAX` tiles out, turns to full
+foam `SHORE_MID` tiles out, runs onto the land tiles at the water's edge (`SHORE_BEACH`) and leaves lace
+that thins away in place. Still in the script but switched off or overridden: `SEA_ONTILE` (a crescent per
+game wave, `caustics_wavetile.bin` from `tools/wavetile.py`) and `SEA_TILED` (`caustics_sea_crescent.bin` /
+`caustics_sea_line.bin` from `tools/seagif.py`).
+
     python wavegif.py ...                                   # foam frames from a wave animation (see the script)
     python swell.py caustics_swell.bin 4 0.55 preview.png   # earlier drawn swell: crests per 128 px, share drawn
 

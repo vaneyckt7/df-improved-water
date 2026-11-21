@@ -56,6 +56,36 @@ PAUSE_FREEZE = true
 -- on, sea water (salt, not flowing) shows foam crests (caustics_swell.bin, made by tools/wavegif.py)
 -- instead of caustics. false = the sea looks like a pond.
 SEA_SWELL = true
+-- SEA_TILED: the whole sea plays one tiling animation of a foam wave passing over caustics
+-- (SEA_FILE, made by tools/seagif.py), one wave every 4 tiles, rolling the way the game's waves
+-- head on this map. It does not follow the individual waves. false = the wave-following foam below.
+SEA_TILED = false
+-- SEA_ONTILE: each of the game's waves gets a foam crescent (caustics_wavetile.bin, made by
+-- tools/wavetile.py) on the tile the game has it on, turned to its heading. The crescent crosses that
+-- tile from back to front as the game's move timer for the wave runs down, then the wave is on the next
+-- tile. Waves are not joined. Overrides SEA_TILED and the foam below.
+SEA_ONTILE = true
+-- SEA_SHORE: surf driven by distance to the coast instead of by the game's wave objects. Every sea tile near
+-- land knows its distance to the nearest land tile. A wave is a band of foam SHORE_BAND tiles deep - bright
+-- front edge, dense foam behind it, a lacy tail (the still-water pattern in white) - drawn so its front is
+-- where that distance equals a value shrinking at SHORE_SPEED tiles per second; one wave every SHORE_GAP
+-- tiles. It appears SHORE_MAX tiles out (front edge to land) as a thin streak with a little lace, turns to full foam SHORE_MID
+-- tiles out, runs up onto the land tiles at the water's edge (SHORE_BEACH; floors on the viewed level) and
+-- leaves thinning lace behind. The band is one texture sliding over the tiles, so nothing switches tile by
+-- tile. Overrides SEA_ONTILE, SEA_TILED and the wave-following foam.
+SEA_SHORE = true
+SHORE_MAX, SHORE_MID, SHORE_GAP, SHORE_SPEED, SHORE_BAND = 2, 1, 6, 0.6, 3.3
+SHORE_BEACH = true
+-- at most this many foam frame sets (about 8 MB each); past it, coasts at new angles use the straight set
+SHORE_SETS = 16
+LACE_COLS = {full = {[0] = 0xD8FFFFFF, 0x48FFFFF0, 0, 0, 0x98FFFFF8, 0},
+             hi = {[0] = 0, 0xA0FFFFF0, 0, 0, 0x58FFFFD8, 0xE0FFFFFF},
+             mid = {[0] = 0, 0x70FFFFF0, 0, 0, 0x28FFFFD8, 0xB0FFFFFF},
+             lo = {[0] = 0, 0x38FFFFE8, 0, 0, 0, 0x70FFFFFF}}
+-- caustics_sea_crescent.bin: crescent-shaped waves; caustics_sea_line.bin: one unbroken wavy foam line
+SEA_FILE = 'caustics_sea_crescent.bin'
+-- caustics as in still water (1 line, 4 very faint, 5 white knot); foam 9 faint, 10 half, 11 solid white
+SEA_COLS = {[0] = 0, [1] = STILL_FAINT, [4] = STILL_VFAINT, [5] = STILL_CROSS, [9] = 0x48FFFFD0, [10] = 0x90FFFFF0, [11] = 0xD8FFFFFF}
 -- The crests are drawn where the game's own waves are (world.event.ocean_waves): one piece of crest per
 -- wave, gliding from its tile toward the next as the wave's move timer runs down, so they keep the game's
 -- pace and stop when it is paused. A wave waits 40-47 ticks between moves; WAVE_TICKS is the middle of that.
@@ -68,15 +98,17 @@ SEA_COVER = 0.6
 -- Following the game's waves: a wave shows no foam in open water; the foam builds as the wave nears the
 -- beach tile it is heading for. Tiles left to go at which it turns faint, half and full.
 SEA_BUILD = {8, 5.5, 3}
+-- waves further out than that show faint foam too (false: no foam in open water)
+SEA_OPEN = true
 -- sea tiles without foam show the still-water caustics (no rings); false leaves them plain
 -- waves standing side by side are joined into wavefronts, each drawn as one continuous line (false: each
 -- wave on its own). SEA_FRONT_LINK: how far apart (tiles along travel) neighbours may be to count as one
 -- front; SEA_FRONT_SMOOTH: columns to either side that shape the line at a column; SEA_FRONT_GAP: a column
 -- further than this from any wave of the front gets no foam (a real gap in the game's row stays a gap)
 SEA_ROWS = true
-SEA_FRONT_LINK = 1.3
-SEA_FRONT_SMOOTH = 3
-SEA_FRONT_GAP = 1.5
+SEA_FRONT_LINK = 2.6
+SEA_FRONT_SMOOTH = 4
+SEA_FRONT_GAP = 2
 -- a sloping front is drawn with foam leaning to match, in steps of a third of a tile per column (the
 -- diagonal foam at a full tile per column); each lean in use is one more baked frame set (false: never)
 SEA_FRONT_SLANT = true
@@ -212,20 +244,32 @@ local function load_swell()
     end
     return swell_data
 end
+local sea_data
+local function load_sea()
+    if sea_data == nil then
+        sea_data = false
+        local f = io.open(dfhack.getDFPath() .. '/dfhack-config/scripts/' .. SEA_FILE, 'rb')
+        if f then
+            local s = f:read('a'); f:close()
+            if #s == STEPS * N * N then sea_data = s end
+        end
+    end
+    return sea_data
+end
 -- 4x4 ordered-dither thresholds, for thinning foam out toward the end of a stretch
 local BAYER = {[0] = 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5}
 -- slant: the crest leans by slant/3 pixels of travel per pixel across, turning about the middle of each
 -- tile-wide strip, so a strip still shows its crest where the unslanted set does and neighbouring strips
 -- placed a slant apart join up (used for wavefronts that are neither straight nor at 45 degrees)
-local function build_swell_frame(data, o, heading, fade, slant)
+local function build_swell_frame(data, o, heading, fade, slant, cols)
     local lean = slant and slant / 3
-    local pix, base, col = {}, o * N * N, SWELL_COLS
+    local pix, base, col = {}, o * N * N, cols or SWELL_COLS
     local turned, flipped = heading == 'north' or heading == 'south', heading == 'east' or heading == 'south'
     -- diagonal headings: the crest lies along a diagonal; (x + y, x - y) both wrap at N, so the tiles still join
     local diag = #heading == 2 and ((heading == 'nw' or heading == 'se') and 1 or -1)
     if diag then flipped = heading == 'se' or heading == 'ne' end
     -- 'faint' and 'mid': foam still building, thinned all over and (faint) one step dimmer
-    local thin = fade == 'faint' and 0.4 or fade == 'mid' and 0.75
+    local thin = fade == 'faint' and 0.4 or fade == 'mid' and 0.75 or fade == 'thin' and 0.6
     local dim = fade == 'faint'
     if thin or diag then fade = nil end
     local rows = {}
@@ -251,6 +295,50 @@ local function build_swell_frame(data, o, heading, fade, slant)
                 elseif dim and v > 5 and v <= 7 then v = v - 1 end
             end
             pix[at + x + 1] = col[v] or 0
+        end
+    end
+    return dfhack.textures.createTileset(pix, N, N, TP, TP)
+end
+
+-- SEA_SHORE: one frame of the surf band, travelling west with its front at column (SHORE_X0 - o); turned,
+-- mirrored and leaned like the swell. The band is cut out of the still-water pattern, which stays where it
+-- is on the map, so sets for different headings and leans join up.
+local SHORE_X0 = 100
+local function build_shore_frame(data, o, heading, lean, far)
+    local pix = {}
+    local turned, flipped = heading == 'north' or heading == 'south', heading == 'east' or heading == 'south'
+    local rows = {}
+    for r = 0, N - 1 do rows[r] = {data:byte(r * N + 1, r * N + N)} end
+    local wob = {}
+    for a = 0, N - 1 do
+        local t = a * 2 * math.pi / N
+        wob[a] = 3.5 * math.sin(2 * t) + 2.5 * math.sin(5 * t + 1) + 1.5 * math.sin(11 * t + 2)
+    end
+    local front = SHORE_X0 - o
+    for y = 0, N - 1 do
+        local at = y * N
+        for x = 0, N - 1 do
+            local along, across = x, y
+            if turned then along, across = y, x end
+            if lean then along = along - math.floor(lean * (across % TP - (TP - 1) / 2) + 0.5) end
+            if flipped then along = N - 1 - along end
+            -- u: px behind the front, with a little grain so the zones do not end on a ruled line
+            local u = (along - front - wob[across]) % N
+            local v = rows[y][x + 1]
+            local line = v == 1 or v == 5
+            local g = u + (BAYER[(y % 4) * 4 + x % 4] - 7.5) * 0.9
+            local c = 0
+            if far then
+                if u < 2.5 then c = 0x90FFFFF8
+                elseif g < 34 then c = line and 0x78FFFFF0 or 0
+                elseif g < 60 then c = line and 0x40FFFFE8 or 0 end
+            elseif u < 4 then c = 0xF0FFFFFF
+            elseif g < 22 then c = line and 0x30FFFFF0 or v == 4 and 0xA0FFFFF8 or 0xD8FFFFFF
+            elseif g < 34 then c = line and 0xE0FFFFFF or v == 4 and 0x90FFFFF8 or (g < 28 and 0x70FFFFF8 or 0x38FFFFF0)
+            elseif g < 62 then c = v == 5 and 0xE0FFFFFF or v == 1 and 0xA8FFFFF8 or v == 4 and 0x50FFFFE8 or 0
+            elseif g < 86 then c = v == 5 and 0xB0FFFFFF or v == 1 and 0x70FFFFF0 or 0
+            elseif g < 104 then c = v == 5 and 0x70FFFFFF or v == 1 and 0x38FFFFE8 or 0 end
+            pix[at + x + 1] = c
         end
     end
     return dfhack.textures.createTileset(pix, N, N, TP, TP)
@@ -333,6 +421,29 @@ local function bake_ring()
 end
 
 local function build_frame(dir, o)
+    local tiled = dir:match('^sea_(%a+)$')
+    if tiled then
+        local data = load_sea()
+        if not data then return build_frame('none', o) end
+        return build_swell_frame(data, o, tiled, nil, nil, SEA_COLS)
+    end
+    local lace = dir:match('^lace_(%a+)$')
+    if lace then
+        local data = load_still()
+        if not data then return build_frame('none', o) end
+        local pix, base, col = {}, o * N * N, LACE_COLS[lace]
+        for y = 0, N - 1 do
+            local row = {data:byte(base + y * N + 1, base + y * N + N)}
+            for x = 1, N do pix[y * N + x] = col[row[x]] or 0 end
+        end
+        return dfhack.textures.createTileset(pix, N, N, TP, TP)
+    end
+    local sh, far, lean = dir:match('^shore_(%a+)_?(%a*)([+-]?%d*)$')
+    if sh then
+        local data = load_still()
+        if not data then return build_frame('none', o) end
+        return build_shore_frame(data, o, sh, lean ~= '' and tonumber(lean) / 2 or nil, far == 'far')
+    end
     local sw, fade, slant = dir:match('^swell_(%a+)_?(%a*)([+-]?%d*)$')
     if sw then
         local data = load_swell()
@@ -492,6 +603,220 @@ local function sea_key()
     else f.key = gy < 0 and 'swell_north' or 'swell_south' end
     return f.key
 end
+-- The tiled sea's heading: the game's waves' headings added up, nearest of the eight compass directions,
+-- fixed once per map (nil until the map has shown waves).
+local function sea_heading()
+    local site = dfhack.world.getCurrentSite()
+    local id = dfhack.world.ReadWorldFolder() .. '/' .. (site and site.id or -1)
+    local f = state.sea_head
+    if f and f.id == id then return f.key end
+    local gx, gy = 0, 0
+    for _, w in ipairs(df.global.world.event.ocean_waves) do
+        local dx, dy = w.dest.x - w.cur.x, w.dest.y - w.cur.y
+        local n = math.sqrt(dx * dx + dy * dy)
+        if n > 0 then gx, gy = gx + dx / n, gy + dy / n end
+    end
+    if gx * gx + gy * gy < 1 then return nil end
+    local oct = math.floor(math.atan(gy, gx) / (math.pi / 4) + 0.5) % 8
+    local names = {[0] = 'east', 'se', 'south', 'sw', 'west', 'nw', 'north', 'ne'}
+    state.sea_head = {id = id, key = 'sea_' .. names[oct]}
+    return state.sea_head.key
+end
+-- SEA_ONTILE: the foam crescent, one texture per frame per heading.
+local wavetile_data
+local function load_wavetile()
+    if wavetile_data == nil then
+        wavetile_data = false
+        local f = io.open(dfhack.getDFPath() .. '/dfhack-config/scripts/caustics_wavetile.bin', 'rb')
+        if f then
+            local s = f:read('a'); f:close()
+            if #s == STEPS * TP * TP then wavetile_data = s end
+        end
+    end
+    return wavetile_data
+end
+local WAVE_DIR = {west = {-1, 0}, east = {1, 0}, north = {0, -1}, south = {0, 1},
+                  nw = {-1, -1}, ne = {1, -1}, sw = {-1, 1}, se = {1, 1}}
+state.wsets, state.wpart = state.wsets or {}, state.wpart or {}
+-- bakes up to `budget` frames of a heading's crescent; returns what is left of the budget
+local function bake_wave(heading, budget)
+    local data = load_wavetile()
+    if not data then return budget end
+    local part = state.wpart[heading] or {}
+    state.wpart[heading] = part
+    local d = WAVE_DIR[heading]
+    local n = math.sqrt(d[1] * d[1] + d[2] * d[2])
+    local hx, hy, c = d[1] / n, d[2] / n, (TP - 1) / 2
+    while budget > 0 and #part < STEPS do
+        local base, pix = #part * TP * TP, {}
+        for y = 0, TP - 1 do
+            for x = 0, TP - 1 do
+                -- the file's crescent travels west: forward is -x there
+                local dx, dy = x - c, y - c
+                local sx = math.floor(c - (dx * hx + dy * hy) + 0.5)
+                local sy = math.floor(c + (dx * hy - dy * hx) + 0.5)
+                local v = 0
+                if sx >= 0 and sx < TP and sy >= 0 and sy < TP then v = data:byte(base + sy * TP + sx + 1) end
+                pix[y * TP + x + 1] = SEA_COLS[v] or 0
+            end
+        end
+        part[#part + 1] = dfhack.textures.createTileset(pix, TP, TP, TP, TP)[1]
+        budget = budget - 1
+    end
+    if #part == STEPS then state.wsets[heading], state.wpart[heading] = part, nil end
+    return budget
+end
+local HEADING8 = {[-1] = {[-1] = 'nw', [0] = 'west', [1] = 'sw'}, [0] = {[-1] = 'north', [1] = 'south'},
+                  [1] = {[-1] = 'ne', [0] = 'east', [1] = 'se'}}
+-- {[y * 8192 + x] = {heading, frame}} for the game's waves on the viewed level or up to 4 below it
+local function wave_tiles(z0)
+    local out = {}
+    for _, w in ipairs(df.global.world.event.ocean_waves) do
+        local x, y, z = w.cur.x, w.cur.y, w.z
+        if z <= z0 and z >= z0 - 4 then
+            local dx, dy = w.dest.x - x, w.dest.y - y
+            local h = HEADING8[dx > 0 and 1 or dx < 0 and -1 or 0][dy > 0 and 1 or dy < 0 and -1 or 0]
+            if h then
+                local f = 1 - w.move_timer / WAVE_TICKS
+                f = f < 0 and 0 or f > 1 and 1 or f
+                out[y * 8192 + x] = {h, math.floor(f * (STEPS - 1) + 0.5)}
+            end
+        end
+    end
+    return out
+end
+-- SEA_SHORE: distance to the coast for the sea tiles in view. Looks at the view plus a margin, so every
+-- tile in view within SHORE_MAX of land finds that land. Returns {t = {[y * 8192 + x] = entry}}, entry =
+-- {distance in tiles (to the land tile's edge, smoothed), frame set, tile middle on the travel axis in px,
+--  px along that axis per tile of distance, mirrored set?, tiles along the axis per tile of distance}.
+local function shore_field(vp, z0)
+    local key = ('%d,%d,%d,%d,%d'):format(vp.x1, vp.y1, vp.x2, vp.y2, z0)
+    local now = dfhack.getTickCount()
+    local c = state.shore
+    -- while the view is moving, the field of a moment ago still covers most of it
+    if c and (c.key == key and now - c.at < 5000 or now - c.at < 300) then return c end
+    c = {key = key, at = now, t = {}}
+    state.shore = c
+    local getFlags, getType = dfhack.maps.getTileFlags, dfhack.maps.getTileType
+    local attrs, OPEN, RAMP_TOP = df.tiletype.attrs, df.tiletype_shape.EMPTY, df.tiletype_shape.RAMP_TOP
+    local M = math.ceil(SHORE_MAX + SHORE_BAND) + 3
+    local W, H = vp.x2 - vp.x1 + 1 + 2 * M, vp.y2 - vp.y1 + 1 + 2 * M
+    local xo, yo, zl = vp.x1 - M, vp.y1 - M, math.max(0, z0 - 4)
+    -- 1 = sea, 0 = land, nil = unknown (off the map, hidden, fresh water, nothing within 5 levels)
+    local kind, BIG = {}, 1e9
+    local floor, FLOOR = {}, df.tiletype_shape.FLOOR
+    local ox, oy, d2 = {}, {}, {}
+    local any = false
+    for cy = 0, H - 1 do
+        for cx = 0, W - 1 do
+            local x, y, v = xo + cx, yo + cy, nil
+            for z = z0, zl, -1 do
+                local d = getFlags(x, y, z)
+                if not d or d.hidden then break end
+                if d.flow_size > 0 then
+                    if d.liquid_type then v = 0 elseif d.water_salt then v = 1 end
+                    break
+                end
+                local tt = getType(x, y, z)
+                if not tt then break end
+                local sh = attrs[tt].shape
+                if sh ~= OPEN and sh ~= RAMP_TOP then
+                    v = 0
+                    floor[cy * W + cx] = z == z0 and sh == FLOOR or nil
+                    break
+                end
+            end
+            local k = cy * W + cx
+            kind[k] = v
+            if v == 0 then ox[k], oy[k], d2[k], any = 0, 0, 0, true else d2[k] = BIG end
+        end
+    end
+    if not any then return c end
+    -- nearest land tile for every cell: two sweeps passing the offset to it along (8SSEDT)
+    local function try(k, cx, cy, nx, ny)
+        local ncx, ncy = cx + nx, cy + ny
+        if ncx < 0 or ncx >= W or ncy < 0 or ncy >= H then return end
+        local nk = ncy * W + ncx
+        if d2[nk] >= BIG then return end
+        local ax, ay = ox[nk] + nx, oy[nk] + ny
+        local dd = ax * ax + ay * ay
+        if dd < d2[k] then ox[k], oy[k], d2[k] = ax, ay, dd end
+    end
+    for cy = 0, H - 1 do
+        for cx = 0, W - 1 do
+            local k = cy * W + cx
+            try(k, cx, cy, -1, 0); try(k, cx, cy, 0, -1); try(k, cx, cy, -1, -1); try(k, cx, cy, 1, -1)
+        end
+        for cx = W - 1, 0, -1 do try(cy * W + cx, cx, cy, 1, 0) end
+    end
+    for cy = H - 1, 0, -1 do
+        for cx = W - 1, 0, -1 do
+            local k = cy * W + cx
+            try(k, cx, cy, 1, 0); try(k, cx, cy, 0, 1); try(k, cx, cy, 1, 1); try(k, cx, cy, -1, 1)
+        end
+        for cx = 0, W - 1 do try(cy * W + cx, cx, cy, -1, 0) end
+    end
+    local dist = {}
+    for k = 0, W * H - 1 do dist[k] = d2[k] < BIG and math.max(0, math.sqrt(d2[k]) - 0.5) or false end
+    -- smoothed over 3x3 so a jagged beach does not put a jag in every line
+    local sm = {}
+    for cy = 1, H - 2 do
+        for cx = 1, W - 2 do
+            local s, n = 0, 0
+            for yy = cy - 1, cy + 1 do
+                for xx = cx - 1, cx + 1 do
+                    local v = dist[yy * W + xx]
+                    if v then s, n = s + v, n + 1 end
+                end
+            end
+            sm[cy * W + cx] = n > 0 and s / n or false
+        end
+    end
+    local t, beach = c.t, {}
+    c.beach = beach
+    local function entry(x, y, k, b, least)
+        local l, r, u, dn = sm[k - 1], sm[k + 1], sm[k - W], sm[k + W]
+        if not (l and r and u and dn) then return end
+        -- (ux, uy): toward the coast
+        local ux, uy = (l - r) / 2, (u - dn) / 2
+        local n = math.sqrt(ux * ux + uy * uy)
+        if n <= least then return end
+        ux, uy = ux / n, uy / n
+        local heading, mid, along, across
+        if math.abs(ux) >= math.abs(uy) then
+            heading, mid, along, across = ux < 0 and 'west' or 'east', (x + 0.5) * TP, ux, uy
+        else
+            heading, mid, along, across = uy < 0 and 'north' or 'south', (y + 0.5) * TP, uy, ux
+        end
+        -- the line lies across the travel direction: it leans -across/along px per px
+        local slant = math.floor(-2 * across / along + 0.5)
+        slant = slant > 2 and 2 or slant < -2 and -2 or slant
+        local inv = 1 / math.abs(along)
+        local sl = slant ~= 0 and ('%+d'):format(slant) or ''
+        return {b, 'shore_' .. heading .. sl, mid, (along > 0 and 1 or -1) * TP * inv, along > 0, inv,
+                'shore_' .. heading .. '_far' .. sl, 'shore_' .. heading, 'shore_' .. heading .. '_far'}
+    end
+    for y = vp.y1, vp.y2 do
+        for x = vp.x1, vp.x2 do
+            local cx, cy = x - xo, y - yo
+            local k = cy * W + cx
+            local b = sm[k]
+            if kind[k] == 1 and b and b <= SHORE_MAX + SHORE_BAND + 2 then
+                t[y * 8192 + x] = entry(x, y, k, b, 0.3)
+            elseif SHORE_BEACH and floor[k] and (kind[k - 1] == 1 or kind[k + 1] == 1 or kind[k - W] == 1 or kind[k + W] == 1) then
+                -- one tile further in than the nearest sea tile beside it
+                local b = math.huge
+                if kind[k - 1] == 1 then b = math.min(b, sm[k - 1] or b) end
+                if kind[k + 1] == 1 then b = math.min(b, sm[k + 1] or b) end
+                if kind[k - W] == 1 then b = math.min(b, sm[k - W] or b) end
+                if kind[k + W] == 1 then b = math.min(b, sm[k + W] or b) end
+                local e = b < math.huge and entry(x, y, k, b - 1, 0.02)
+                if e then beach[#beach + 1] = {x, y, e} end
+            end
+        end
+    end
+    return c
+end
 -- The train: which stretch of which crest a sea tile shows at this step, as the frame set to draw it with
 -- (plain, or thinning toward a gap), or false in a gap. Crests are numbered as they travel.
 local SWELL_AXIS = {swell_west={1, 0, 1}, swell_east={1, 0, -1}, swell_north={0, 1, 1}, swell_south={0, 1, -1}}
@@ -546,7 +871,7 @@ local function sea_crests(vp, z0)
         end
     end
     local function stage(left)
-        return left <= SEA_BUILD[3] and '' or left <= SEA_BUILD[2] and '_mid' or left <= SEA_BUILD[1] and '_faint'
+        return left <= SEA_BUILD[3] and '' or left <= SEA_BUILD[2] and '_mid' or (SEA_OPEN or left <= SEA_BUILD[1]) and '_faint'
     end
     local function put(tx, ty, set, frame, d)
         local k = ty * 8192 + tx
@@ -582,11 +907,7 @@ local function sea_crests(vp, z0)
             need(HEADING[dx][0]); need(HEADING[0][dy])
         end
         if arrows and z == z0 then behind[#behind + 1] = (y - dy) * 8192 + x - dx end
-        if heading and dx ~= 0 and dy ~= 0 then
-            local m = at[heading]
-            if not m then m = {}; at[heading] = m end
-            m[y * 8192 + x] = true
-        end
+        if heading and z <= z0 and z >= z0 - 4 then at[y * 8192 + x] = true end
         if heading and x >= xa - RM and x <= xb + RM and y >= ya - RM and y <= yb + RM and z <= z0 and z >= z0 - 4 then
             local f = 1 - w.move_timer / WAVE_TICKS
             f = f < 0 and 0 or f > 1 and 1 or f
@@ -594,19 +915,22 @@ local function sea_crests(vp, z0)
             ws[#ws + 1] = e
         end
     end
-    -- which way the rows of each diagonal heading run: one answer per heading from all its waves on the map
-    -- (deciding per wave gave mixed orientations inside one row); kept until the count clearly reverses
-    state.sea_axis = state.sea_axis or {}
-    local row_axis = state.sea_axis
-    for heading, m in pairs(at) do
+    -- Which way the line of waves runs at a wave: the game's waves stand in one long line that follows the
+    -- coast, so the same heading (say north-west) stands in an east-west line in one place and a north-south
+    -- line in another. Compare how far the waves within two tiles lie to the side and above/below. A line
+    -- running mostly north-south is drawn as crest travelling along x, one running east-west along y.
+    local function line_axis(e)
+        if e.dy == 0 then return 'x' elseif e.dx == 0 then return 'y' end
         local h, v = 0, 0
-        for k in pairs(m) do
-            if m[k + 1] then h = h + 1 end
-            if m[k + 8192] then v = v + 1 end
+        for oy = -2, 2 do
+            for ox = -2, 2 do
+                if (ox ~= 0 or oy ~= 0) and at[(e.y + oy) * 8192 + e.x + ox] then
+                    h, v = h + math.abs(ox), v + math.abs(oy)
+                end
+            end
         end
-        local cur = row_axis[heading]
-        if h > 2 * v + 2 or not cur and h > v then row_axis[heading] = 'y'
-        elseif v > 2 * h + 2 or not cur and v > h then row_axis[heading] = 'x' end
+        if h == 0 and v == 0 then return nil end
+        return v > h and 'x' or 'y'
     end
     -- Rows: the game moves every wave on its own timer, so a row of them is ragged. Waves standing side by
     -- side (a row across their travel) are drawn as one straight crest at the row's average position, which
@@ -619,7 +943,7 @@ local function sea_crests(vp, z0)
         local axis  -- 'x': crest runs north-south and travels along x; 'y': the other way round
         if not SEA_ROWS then axis = nil
         elseif dy == 0 then axis = 'x' elseif dx == 0 then axis = 'y'
-        else axis = row_axis[e.heading] end
+        else axis = line_axis(e) end
         if not axis then
             if x >= xa and x <= xb and y >= ya and y <= yb then
                 local build = stage(math.max(math.abs(e.tx - x), math.abs(e.ty - y)) - e.f)
@@ -656,7 +980,9 @@ local function sea_crests(vp, z0)
                     local other = g[cc]
                     if other then
                         for _, o in ipairs(other) do
-                            if o ~= e and math.abs(o.s - e.s) <= SEA_FRONT_LINK then
+                            -- two waves in one column are one front only when they are the same row caught
+                            -- mid-step, not one wave behind another
+                            if o ~= e and math.abs(o.s - e.s) <= (cc == c and 0.6 or SEA_FRONT_LINK) then
                                 local ra, rb = find(e), find(o)
                                 if ra ~= rb then ra.root = rb end
                             end
@@ -681,17 +1007,20 @@ local function sea_crests(vp, z0)
         for _, fr in pairs(fronts) do
             local dir, axis = fr[1].dir, fr[1].axis
             local q1, q2 = math.floor(fr.lo), math.ceil(fr.hi)
-            local pos, left = {}, {}
+            local pos, left, own = {}, {}, {}
             for q = q1, q2 do
-                local sw, ss, sl, near = 0, 0, 0, math.huge
+                local sw, ss, sl, near, ne = 0, 0, 0, math.huge, nil
                 for i = 1, #fr do
                     local e = fr[i]
                     local off = math.abs(e.p - q)
-                    if off < near then near = off end
+                    if off < near then near, ne = off, e end
                     local w = 1 - off / SEA_FRONT_SMOOTH
                     if w > 0 then sw, ss, sl = sw + w, ss + w * e.s, sl + w * e.left end
                 end
-                if sw > 0 and near <= SEA_FRONT_GAP then pos[q], left[q] = ss / sw, sl / sw end
+                if sw > 0 and near <= SEA_FRONT_GAP then
+                    pos[q], left[q] = ss / sw, sl / sw
+                    own[q] = ne.dx ~= 0 and ne.dy ~= 0 and ne.heading or nil
+                end
             end
             for q = q1, q2 do
                 local s, build = pos[q], pos[q] and stage(left[q])
@@ -706,11 +1035,19 @@ local function sea_crests(vp, z0)
                     if third >= 3 then
                         -- the diagonal heading that travels the front's way with its crest along the slope
                         local turn = m > 0 and -dir or dir
-                        diag = axis == 'x' and HEADING[dir][turn] or HEADING[turn][dir]
-                        need(diag)
-                        set = 'swell_' .. diag .. build
-                        if not state.sets[set] then diag, set = nil, nil end  -- still baking: straight for now
-                    elseif third > 0 then
+                        local cand = axis == 'x' and HEADING[dir][turn] or HEADING[turn][dir]
+                        if own[q] and own[q] ~= cand then
+                            -- the line here runs along the waves' own travel (a kink in the coast): no crest
+                            -- travels that way, so lean as far as the straight foam goes
+                            third = 2
+                        else
+                            need(cand)
+                            -- still baking: straight for now
+                            if state.sets['swell_' .. cand .. build] then diag, set = cand, 'swell_' .. cand .. build end
+                            third = 0
+                        end
+                    end
+                    if third > 0 then
                         -- in between: the straight foam leaning a third or two thirds of a tile per column
                         set = ('swell_%s%s%+d'):format(name, build, m > 0 and third or -third)
                         if not want[set] then want[set] = true; want[#want + 1] = set end
@@ -884,7 +1221,50 @@ function CausticsOverlay:onRenderFrame()
     local pen = {ch=0, fg=COLOR_WHITE}
     local x1, y1, x2, y2 = vp.x1, vp.y1, vp.x2, vp.y2
     local budget = BAKE_PER_FRAME
-    local crests = SEA_SWELL and SEA_FOLLOW and sea_crests(vp, df.global.window_z)
+    local has_sea = false
+    for i = 1, #list do if list[i][3] == 'sea' then has_sea = true break end end
+    local shore = SEA_SWELL and SEA_SHORE and has_sea and load_still() and shore_field(vp, df.global.window_z).t
+    local shore_p = -now / 1000 * SHORE_SPEED
+    local wtiles = not shore and SEA_SWELL and SEA_ONTILE and load_wavetile() and wave_tiles(df.global.window_z)
+    local tiled = not shore and not wtiles and SEA_SWELL and SEA_TILED and load_sea() and sea_heading()
+    local crests = not shore and not tiled and not wtiles and SEA_SWELL and SEA_FOLLOW and sea_crests(vp, df.global.window_z)
+    -- foam texture for a tile of the shore field, or nil; on = true for a land tile at the water's edge
+    local function shore_tex(e, x, y, on)
+        -- rb: how far this tile is behind (seaward of) the front that last passed it, in tiles of distance
+        -- to the coast; slightly negative when the next front is about to reach it
+        local rb = (e[1] - shore_p) % SHORE_GAP
+        if rb > SHORE_GAP - 0.4 then rb = rb - SHORE_GAP end
+        local la = e[1] - rb
+        -- (the band texture repeats every 4 tiles along its travel axis: stay clear of the next copy)
+        if rb >= SHORE_BAND or rb * e[6] >= 2.9 or la > SHORE_MAX then return end
+        local name, slide = nil, true
+        if la > -0.6 then
+            local far = la > SHORE_MID
+            name = far and e[7] or e[2]
+            if not state.sets[name] and not state.partial[name] then
+                local n = 0
+                for k in pairs(state.sets) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
+                for k in pairs(state.partial) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
+                if n >= SHORE_SETS then name = far and e[9] or e[8] end
+            end
+        elseif not on and la > -2.2 then
+            -- the wave has run out: what is left of its lace thins away
+            name, slide = la > -1.4 and 'lace_mid' or 'lace_lo', false
+        end
+        if not name then return end
+        local set = state.sets[name]
+        if not set and budget > 0 then
+            budget = bake_some(name, budget)
+            set = state.sets[name]
+        end
+        if not set then return end
+        local f = t_still
+        if slide then
+            local a = e[3] + e[4] * rb
+            f = math.floor((e[5] and SHORE_X0 - (N - 1) + a or SHORE_X0 - a) + 0.5) % STEPS
+        end
+        return getTexpos(set[f + 1][(y % 4) * 4 + (x % 4) + 1])
+    end
     local gaps = SEA_COVER < 1
     local mvp = df.global.gps.main_viewport
     local under, dim_y, foam = SEA_UNDER and mvp[SEA_UNDER], mvp.dim_y, nil
@@ -892,10 +1272,36 @@ function CausticsOverlay:onRenderFrame()
         local p = list[i]
         local key = p[3]
         foam = nil
-        if key == 'sea' then
+        if key == 'sea' and tiled then
+            key = tiled
+        elseif key == 'sea' then
             local x, y = p[1], p[2]
+            local e = shore and shore[y * 8192 + x]
+            local ft = e and shore_tex(e, x, y)
+            if ft then
+                foam = ft
+                if not (under and SEA_CAUSTICS) then
+                    paint(pen, x - x1, y - y1, nil, foam, true)
+                    goto next
+                end
+            end
+            local h = wtiles and wtiles[y * 8192 + x]
+            if h and x >= x1 and x <= x2 and y >= y1 and y <= y2 then
+                local set = state.wsets[h[1]]
+                if not set and budget > 0 then
+                    budget = bake_wave(h[1], budget * 8) // 8
+                    set = state.wsets[h[1]]
+                end
+                if set then
+                    foam = getTexpos(set[h[2] + 1])
+                    if not (under and SEA_CAUSTICS) then
+                        paint(pen, x - x1, y - y1, nil, foam, true)
+                        goto next
+                    end
+                end
+            end
             local c = crests and crests[y * 8192 + x]
-            if c == false then goto next end
+            if c == false and not wtiles and not shore then goto next end
             if c and x >= x1 and x <= x2 and y >= y1 and y <= y2 then
                 local set = state.sets[c[1]]
                 if not set and budget > 0 then
@@ -927,7 +1333,7 @@ function CausticsOverlay:onRenderFrame()
             tp = false  -- not baked yet: leave these tiles plain for now
             if set then
                 tp = {}
-                local still_pace = key == 'none' or key:sub(1, 6) == 'swell_'
+                local still_pace = key == 'none' or key:sub(1, 6) == 'swell_' or key:sub(1, 4) == 'sea_'
                 local frame = set[(still_pace and t_still or t_flow) + 1]
                 for k = 1, 16 do tp[k] = getTexpos(frame[k]) end
             end
@@ -962,6 +1368,14 @@ function CausticsOverlay:onRenderFrame()
             paint(pen, x - x1, y - y1, nil, tex, true)
         end end
         ::next::
+    end
+    local beach = shore and state.shore and state.shore.beach
+    if beach then
+        for i = 1, #beach do
+            local b = beach[i]
+            local tex = shore_tex(b[3], b[1], b[2], true)
+            if tex then paint(pen, b[1] - x1, b[2] - y1, nil, tex, true) end
+        end
     end
     if crests and state.sea_want then
         for _, k in ipairs(state.sea_want) do
