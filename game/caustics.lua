@@ -76,7 +76,8 @@ SEA_ONTILE = true
 SEA_SHORE = true
 SHORE_MAX, SHORE_MID, SHORE_GAP, SHORE_SPEED, SHORE_BAND = 2, 1, 6, 0.6, 3.3
 SHORE_BEACH = true
--- at most this many foam frame sets (about 8 MB each); past it, coasts at new angles use the straight set
+-- at most this many foam frame sets (about 8 MB each; a thinning set counts as 1/EBB_DIV); past it, coasts
+-- at new angles use the straight set
 SHORE_SETS = 56
 -- how far the wave front runs into the last land tile before it stops and the foam thins away in place,
 -- as tiles past the water's edge plus 0.5 (1 = half a tile onto the land, 2 = a tile and a half). The stop line
@@ -576,15 +577,19 @@ end
 -- Baking a whole loop takes ~0.7 s, so it is spread over render frames: bake_some() adds
 -- up to BAKE_PER_FRAME frames per call, and a direction is only drawn once complete.
 BAKE_PER_FRAME = 2
+EBB_DIV = 4
 state.partial = state.partial or {}
 local function bake_some(dir, budget)
     local part = state.partial[dir] or {}
     state.partial[dir] = part
-    while budget > 0 and #part < STEPS do
-        part[#part + 1] = build_frame(dir, #part)
+    -- (the thinning sets of the shore surf keep every EBB_DIV-th frame only: there are many of them)
+    local div = dir:find('_ebb', 1, true) and EBB_DIV or 1
+    local want = STEPS // div
+    while budget > 0 and #part < want do
+        part[#part + 1] = build_frame(dir, #part * div)
         budget = budget - 1
     end
-    if #part == STEPS then
+    if #part == want then
         state.sets[dir], state.partial[dir] = part, nil
     end
     return budget
@@ -1386,8 +1391,11 @@ function CausticsOverlay:onRenderFrame()
         -- (a land tile needs its sliding set and its thinning set at the same lean, or the front would kink)
         if not have(name) or on and la <= SHORE_MID and not (have(e[15]) and have(halt)) then
             local n = 0
-            for k in pairs(state.sets) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
-            for k in pairs(state.partial) do if k:byte(1) == 115 and k:byte(2) == 104 then n = n + 1 end end
+            for _, t in ipairs{state.sets, state.partial} do
+                for k in pairs(t) do
+                    if k:byte(1) == 115 and k:byte(2) == 104 then n = n + (k:find('_ebb', 1, true) and 1 / EBB_DIV or 1) end
+                end
+            end
             if n >= SHORE_SETS then name = alt end
         end
         if not name then return end
@@ -1398,7 +1406,7 @@ function CausticsOverlay:onRenderFrame()
         end
         if on and budget > 0 and not state.sets[halt] and name == e[15] then budget = bake_some(halt, budget) end
         if not set then return end
-        local f = ebb
+        local f = ebb and ebb // EBB_DIV
         if slide then
             local a = e[3] + e[4] * rb
             f = math.floor((e[5] and SHORE_X0 - (N - 1) + a or SHORE_X0 - a) + 0.5) % STEPS

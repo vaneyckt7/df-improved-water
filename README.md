@@ -25,7 +25,9 @@ The distance field is signed: positive at sea, negative on land, zero at the wat
 The front stops where it equals `0.5 - SHORE_RUN` (`SHORE_RUN = 1`: half a tile onto the sand), so the stop
 line keeps one distance from the smoothed coast and rounds steps and corners instead of following tiles.
 Each land tile knows how many px that line lies landward of its centre (steps of 8) and, once the front gets
-there, shows a thinning set baked for that offset (`_ebba` .. `_ebbj` = -24 .. +48 px). The foam thins fastest
+there, shows a thinning set baked for that offset (`_ebba` .. `_ebbj` = -24 .. +48 px). Thinning sets keep
+every `EBB_DIV`-th frame (4) and count as a quarter of a set toward `SHORE_SETS`; past that cap a leaning coast
+falls back to the straight sets and the foam on the sand goes square. The foam thins fastest
 at the stop line and slowest toward the sea, so the sheet dries from its inland edge and the last foam lies
 at the water's edge. On land the dense foam reaches further back
 (`_sand` sets) so the sheet on the sand stays wide. On land, and on sea tiles touching
