@@ -13,6 +13,24 @@ removed after commit c8352cc; its data files and tools (`caustics_swell.bin`, `c
 `caustics_sea_*.bin`, `wavetiles.lua`, `tools/wavegif.py`, `swell.py`, `wavetile.py`, `seagif.py`) are still
 in the repo but no longer used by the script.
 
+`UNDER_LAYER` in the script: the caustics are written to the map viewport layer `screentexpos_signpost`,
+below the interface layer other overlays paint on, so the waves and foam of the Flowing Waves mod (Steam
+Workshop 3829998283) show over them. `false` paints on the interface layer as before.
+
+`game/flowing_waves_art/` holds replacement art for that mod, in the mod's own sheet layout: `seafoam.png`
+(foam on the beach and spray) and `swell.png` (crests out at sea). Built by `tools/fwsheets.py`:
+
+    python fwsheets.py ../game/flowing_waves_art preview.png
+
+To install, keep a copy of the mod's own `art/seafoam.png` and `art/swell.png`, copy ours over them and run
+`flowing_waves reload` in DFHack. To go back, restore the two files and reload again. A Workshop update of
+the mod overwrites them. Notes from testing in game:
+
+- Only the two freshest foam stages are bright solid foam. The game leaves foam on the sand long after the
+  water has pulled back, so older stages are thin strands that break into crumbs.
+- A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
+  opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
+
 `tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
 
 Current still water: taken from a 128-frame looping grayscale caustics animation (not in this repo; the

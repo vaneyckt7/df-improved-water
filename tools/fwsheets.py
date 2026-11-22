@@ -45,13 +45,13 @@ def lace(variant, frame):
     return (np.hypot(dx, dy) / rad).min(axis=2)
 
 
-def breakup():
-    r = np.random.RandomState(3)
+def breakup(variant):
+    r = np.random.RandomState(3 + variant)
     f = np.zeros((T, T))
     for _ in range(6):
         kx, ky = r.randint(-2, 3, 2)
         f += np.cos(2 * np.pi * (kx * xx + ky * yy) / T + r.rand() * 6.3)
-    f += 1.5 * (np.random.RandomState(4).rand(T, T) - 0.5)
+    f += 1.5 * (np.random.RandomState(40 + variant).rand(T, T) - 0.5)
     return (f - f.min()) / (f.max() - f.min())
 
 
@@ -72,12 +72,18 @@ def outline(joined, variant):
     return R - np.sqrt(q)
 
 
-STAGE = [  # bubble size (share of full radius), share broken away
-    (1.42, 0.84), (1.34, 0.62), (1.26, 0.36), (1.16, 0.12), (1.06, 0.0), (0.96, 0.0), (0.86, 0.0), (0.74, 0.0)]
+# Only the freshest foam is bright white. The game leaves foam on the sand long after the water has pulled
+# back, so the older stages are a residue of thin strands that break up into crumbs.
+STAGE = [  # bubble size (share of full radius), share broken away, white core
+    (1.50, 0.86, False), (1.44, 0.74, False), (1.38, 0.60, False), (1.31, 0.46, False),
+    (1.23, 0.30, False), (1.13, 0.14, False), (0.92, 0.0, True), (0.74, 0.0, True)]
+# In game a see-through pixel comes out darker than the sand under it, whatever its colour (measured with
+# faint and with dithered foam), so the residue is fully opaque: thin strands, most of them broken away.
+RESIDUE = (226, 236, 232)
 
 
 def foam_tile(e, brk, m, stage, joined=0):
-    size, gone = STAGE[stage]
+    size, gone, core = STAGE[stage]
     size = size + 0.5 * (1 - np.clip(m / 6.0, 0, 1))   # bubbles open up toward the patch's rim
     # toward a joined side the foam opens into lace too: the neighbour may be foam (the lace carries on) or
     # a wave's water (a solid edge there would show the tile's square)
@@ -86,14 +92,24 @@ def foam_tile(e, brk, m, stage, joined=0):
             size = size + 0.22 * (1 - np.clip(d / 8.0, 0, 1))
     alive = (m > 0) & (brk >= gone)
     out = np.zeros((T, T, 4), np.uint8)
-    out[alive & (e > size)] = LIGHT
-    out[alive & (e > size + 0.16)] = WHITE
+    if core:
+        out[alive & (e > size)] = LIGHT
+        out[alive & (e > size + 0.16)] = WHITE
+    else:
+        out[alive & (e > size)] = RESIDUE + (255,)
     return out
+
+
+def bleed(sheet, rgb):
+    """The game scales tiles smoothly without weighting colour by opacity, so invisible black pixels would
+    bleed into their neighbours as a dark fringe. Give the invisible pixels the foam's colour."""
+    sheet[..., :3][sheet[..., 3] == 0] = rgb
+    return sheet
 
 
 def seafoam():
     sheet = np.zeros((8 * 16 * 4 * T, FR * T, 4), np.uint8)
-    brk = breakup()
+    brks = [breakup(v) for v in range(4)]
     laces = [[lace(v, f) for f in range(FR)] for v in range(4)]
     for stage in range(8):
         for joined in range(16):
@@ -101,13 +117,14 @@ def seafoam():
                 m = outline(joined, v)
                 row = (stage * 16 + joined) * 4 + v
                 for f in range(FR):
-                    sheet[row * T:(row + 1) * T, f * T:(f + 1) * T] = foam_tile(laces[v][f], brk, m, stage, joined)
-    return sheet
+                    sheet[row * T:(row + 1) * T, f * T:(f + 1) * T] = foam_tile(laces[v][f], brks[v], m, stage, joined)
+    return bleed(sheet, RESIDUE)
 
 
 CREST = [  # thickness px, colour of the line, trailing speckle depth px, share of the line drawn
-    (1.3, (96, 176, 186, 150), 0, 0.72), (1.9, (150, 208, 212, 190), 0, 0.88),
-    (2.7, LIGHT, 4, 1.0), (3.6, WHITE, 7, 1.0)]
+    (2.6, (84, 168, 180, 255), 2, 1.0), (3.0, (140, 202, 208, 255), 3, 1.0),
+    (3.0, LIGHT[:3] + (255,), 4, 1.0), (3.8, WHITE[:3] + (255,), 7, 1.0)]
+# (far-out crests thinner or see-through than this were invisible in game)
 
 
 def crest_tile(white, frame):
@@ -146,7 +163,7 @@ def swell():
             for h, t in enumerate((n, n[::-1], np.rot90(n, 3), np.rot90(n, 1))):   # north, south, east, west
                 row = h * 4 + white
                 sheet[row * T:(row + 1) * T, f * T:(f + 1) * T] = t
-    return sheet
+    return bleed(sheet, LIGHT[:3])
 
 
 def preview(foam, crest, path):
