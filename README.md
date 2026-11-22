@@ -7,42 +7,11 @@
 - `caustics_rings.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
 - `caustics_fields.bin` - data for the river pattern
 
-Sea (`SEA_SWELL`, `SEA_FOLLOW`): salt water with no flow shows the still-water caustics (`SEA_CAUSTICS`, no
-rings) and foam crests that follow the game's own waves (`world.event.ocean_waves`). Waves standing side by
-side are joined into wavefronts (`SEA_ROWS`, `SEA_FRONT_*`) and each front is drawn as one continuous line:
-every column along it gets foam at a smoothed position, columns without a wave are filled in, and a sloping
-front uses foam leaning to match (`SEA_FRONT_SLANT`; thirds of a tile per column, baked when first needed).
-Foam fades in as a wave nears its destination (`SEA_BUILD`). On a foam tile the caustics go to a lower
-viewport layer (`SEA_UNDER`) so both show. `caustics_swell.bin` holds 128 frames of 128x128 level bytes,
-crest travelling west; the script mirrors, turns and slants it. `wavetiles.lua` is a debug overlay that
-marks the tile behind each game wave with an arrow (`overlay enable wavetiles.show`).
-
-Shore surf (`SEA_SHORE`, on by default; overrides the wave-following foam above): every sea tile near land
-knows its distance to the coast, and a band of white foam cut from the still-water pattern is drawn where
-that distance equals a value shrinking over time. It appears faint `SHORE_MAX` tiles out, turns to full
-foam `SHORE_MID` tiles out and runs up the land (`SHORE_BEACH`: floor or pebble tiles on the viewed level).
-The distance field is signed: positive at sea, negative on land, zero at the water's edge, smoothed over 3x3.
-The front stops where it equals `0.5 - SHORE_RUN` (`SHORE_RUN = 1`: half a tile onto the sand), so the stop
-line keeps one distance from the smoothed coast and rounds steps and corners instead of following tiles.
-Each land tile knows how many px that line lies landward of its centre (steps of 8) and, once the front gets
-there, shows a thinning set baked for that offset (`_ebba` .. `_ebbj` = -24 .. +48 px). Thinning sets keep
-every `EBB_DIV`-th frame (4) and count as a quarter of a set toward `SHORE_SETS`; past that cap a leaning coast
-falls back to the straight sets and the foam on the sand goes square. The foam thins fastest
-at the stop line and slowest toward the sea, so the sheet dries from its inland edge and the last foam lies
-at the water's edge. On land the dense foam reaches further back
-(`_sand` sets) so the sheet on the sand stays wide. On land, and on sea tiles touching
-land, the foam is drawn solid with the sea colour (`SHORE_WATER`) mixed in beforehand, so neither the ground
-nor the game's ragged shoreline edge shows through it. Behind the front, where the foam has thinned, those
-tiles are filled with the plain sea colour (fading out further back), so no bare sand shows on the seaward
-side of the foam while the wave is on the beach. Before the distances are worked out the land is
-grown and shrunk by `SHORE_CLOSE` tiles, so notches and narrow channels do not each bend the foam their own
-way (they stay calm past two tiles in). A land tile's distance inland follows the coast's angle there, so
-on a diagonal coast the foam on the sand ends in one slanted line. Still in the script but switched off or overridden: `SEA_ONTILE` (a crescent per
-game wave, `caustics_wavetile.bin` from `tools/wavetile.py`) and `SEA_TILED` (`caustics_sea_crescent.bin` /
-`caustics_sea_line.bin` from `tools/seagif.py`).
-
-    python wavegif.py ...                                   # foam frames from a wave animation (see the script)
-    python swell.py caustics_swell.bin 4 0.55 preview.png   # earlier drawn swell: crests per 128 px, share drawn
+Sea: salt water with no flow, on a map where the game has ocean waves (`world.event.ocean_waves`), shows the
+still-water caustics without rings. The foam and surf code (wave-following crests, shore surf, tiled sea) was
+removed after commit c8352cc; its data files and tools (`caustics_swell.bin`, `caustics_wavetile.bin`,
+`caustics_sea_*.bin`, `wavetiles.lua`, `tools/wavegif.py`, `swell.py`, `wavetile.py`, `seagif.py`) are still
+in the repo but no longer used by the script.
 
 `tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
 
