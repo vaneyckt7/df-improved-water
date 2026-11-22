@@ -31,6 +31,19 @@ the mod overwrites them. Notes from testing in game:
 - A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 
+`tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet`, `riverfringe`, `riverseafringe`,
+`riverbase`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
+the mod's originals and writes into the mod's `art/` folder; the results are the mod author's art recoloured
+and are not kept here.
+
+    python -I fwtint.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes
+    python -I fwtint.py <mod>/art_original <mod>/art - 0.7        # keep the colours, 70% of the opacity
+    python -I fwtint.py <mod>/art_original <mod>/art 20,114,127 1.2   # chosen: lighter than the sea, opaque
+
+Measured in game: a see-through pixel shows as colour x opacity x opacity over the ground (at 70% opacity
+the uncorrected teal wash turned mud brown), so the tool divides the colour by the opacity. With that
+correction, 70% teal over red sand comes out grey.
+
 `tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
 
 Current still water: taken from a 128-frame looping grayscale caustics animation (not in this repo; the

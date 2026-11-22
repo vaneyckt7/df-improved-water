@@ -56,6 +56,14 @@ PAUSE_FREEZE = true
 -- UNDER_LAYER: map viewport layer the caustics are written to, below the interface layer that overlays such as
 -- Flowing Waves paint on, so their waves and foam show over the caustics. false = paint on the interface layer.
 UNDER_LAYER = 'screentexpos_signpost'
+-- SEA_WASH: also light the wave water that washes over the beach (OceanWave flows at least this dense; the
+-- Flowing Waves mod draws thinner ones as foam). false = sea tiles only. Tiles holding an item, creature or
+-- building are left alone.
+SEA_WASH = 20
+-- The wash is lighter than the sea (about RGB 20,114,127 with the recoloured Flowing Waves sheets), and by
+-- the blend above the sea's line colours come out DARKER than it (measured: lines grey on the wash). These
+-- stronger ones lift it instead: level 1 line, 2 bright, 3 glint, 4 very faint, 5 white.
+WASH_COLS = {0x91FFFF40, 0x9EFFFF50, 0xADFFFFA0, 0x85FFFF40, 0xADFFFF60}   -- lifts of about +19, +28, +42, +10, +42; crossings aqua, not white (white came out grey)
 state = state or {}
 state.sets = state.sets or {}            -- frame sets keyed by flow direction
 state.stats = state.stats or {n=0, us=0}
@@ -139,9 +147,9 @@ local function load_still()
     end
     return still_data
 end
-local function build_still_frame(data, o, ox, oy)
+local function build_still_frame(data, o, ox, oy, wash)
     ox, oy = ox or 0, oy or 0
-    local pix, base, col = {}, o * N * N, {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS, STILL_SHADOW, RING_COLS[1], RING_COLS[2], RING_COLS[3], RING_COLS[4], RING_COLS[5], RING_COLS[6]}
+    local pix, base, col = {}, o * N * N, wash and {[0] = 0, WASH_COLS[1], WASH_COLS[2], WASH_COLS[3], WASH_COLS[4], WASH_COLS[5]} or {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS, STILL_SHADOW, RING_COLS[1], RING_COLS[2], RING_COLS[3], RING_COLS[4], RING_COLS[5], RING_COLS[6]}
     for y = 0, N - 1 do
         local sy = (y - oy) % N
         local row = {data:byte(base + sy * N + 1, base + sy * N + N)}
@@ -236,7 +244,7 @@ local function build_frame(dir, o)
     end
     if not DIRS[dir] then
         local data = load_still()
-        if data then return build_still_frame(data, o) end
+        if data then return build_still_frame(data, o, 0, 0, dir == 'wash') end
     end
     if DIRS[dir] and FLOW_STILL > 0 then
         local data = load_still()
@@ -462,6 +470,31 @@ local function water_map(vp)
             end
         end
     end
+    if sea and SEA_WASH then
+        local WAVE = df.flow_type.OceanWave
+        for by = vp.y1 - vp.y1 % 16, vp.y2, 16 do
+            for bx = vp.x1 - vp.x1 % 16, vp.x2, 16 do
+                local block = getBlock(bx, by, z0)
+                for _, flow in ipairs(block and block.flows or {}) do
+                    if flow.type == WAVE and flow.density >= SEA_WASH then
+                        local pos = flow.pos
+                        local x, y = pos.x, pos.y
+                        if pos.z == z0 and x >= vp.x1 and x <= vp.x2 and y >= vp.y1 and y <= vp.y2 then
+                            local at = (y - vp.y1 + M) * W + (x - vp.x1 + M)
+                            if not dm[at] and not water[at] then
+                                local d, occ = getFlags(x, y, z0)
+                                if d and not d.hidden and occ.building == 0
+                                    and not (occ.item or occ.unit or occ.unit_grounded) then
+                                    dm[at] = 'wash'
+                                    list[#list + 1] = {x, y, 'wash'}
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
     state.cache, state.key, state.cache_at, state.z = list, key, now, z0
     return list
 end
@@ -520,7 +553,7 @@ function CausticsOverlay:onRenderFrame()
             tp = false  -- not baked yet: leave these tiles plain for now
             if set then
                 tp = {}
-                local still_pace = key == 'none'
+                local still_pace = key == 'none' or key == 'wash'
                 local frame = set[(still_pace and t_still or t_flow) + 1]
                 for k = 1, 16 do tp[k] = getTexpos(frame[k]) end
             end
