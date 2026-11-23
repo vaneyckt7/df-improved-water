@@ -170,7 +170,7 @@ def swell():
 # the rock's edge. The mod draws this sheet on the rock tile: row = mask of the sides and corners facing
 # the wash (N=1 E=2 S=4 W=8 NE=16 NW=32 SE=64 SW=128), every tile on the same frame. Here: the water laps
 # a few px onto the rock, with a line of foam at its rim. Opaque, see the note at RESIDUE.
-WASH = (20, 114, 127)   # the wash colour set with fwtint.py
+WASH = (15, 112, 125)   # the base water colour of the recoloured wash sheet and of the sea in game (measured)
 LIP = 4.0               # px the water reaches onto the rock at the tile's ends (and the corner radius)
 
 

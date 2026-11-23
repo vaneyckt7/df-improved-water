@@ -719,6 +719,11 @@ local function classify(tiletype, x, y, z)
     return 'other'
 end
 
+local function is_driftwood(x, y, z)
+    local tiletype = dfhack.maps.getTileType(x, y, z)
+    return tiletype and df.tiletype.attrs[tiletype].material == df.tiletype_material.DRIFTWOOD
+end
+
 local function tile_key(x, y, z)
     return x + y * 4096 + z * 16777216
 end
@@ -977,8 +982,11 @@ local function plan_river(waves, foam, spray, z)
             local dir = FLOW_DIRECTIONS[facing]
             -- Like vanilla river tiles, each tile runs a frame behind the one upstream of it, so
             -- the caustics travel away from the sea.
+            -- Driftwood: the game draws the log on the second floor layer, where the wash would go, and
+            -- on top of the map the wash came out see-through, so the sand under the log looked dry.
+            -- There the wash takes the place of the sand, on the first floor layer, under the log.
             pieces[#pieces + 1] = piece(x, y, 'wash', wash_row(touches_sea, wet_sides, facing),
-                -(x * dir.dx + y * dir.dy), 'floor')
+                -(x * dir.dx + y * dir.dy), is_driftwood(x, y, z) and 'under' or 'floor')
         end
     end
 

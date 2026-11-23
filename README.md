@@ -29,7 +29,8 @@ Added to the mod's logic: all natural ground that touches the open sea (rock, pe
 boulders; not built floors) gets the rock rim, not only rock beside the wash. The game's own frayed sand
 edge on the sea tiles beside it is switched off. The sea tiles come from the caustics' own scan of the view. The wash no longer draws the mod's
 foam band inside the water tile against sand: sand beside the wash gets the same rim, so the foam line runs on
-unbroken from the wash to the sea.
+unbroken from the wash to the sea. On driftwood the game's log sits on the layer the wash uses, so there the wash replaces
+the sand on the first floor layer and the log lies in the water.
 
 `game/caustics_waves_art/` holds the wave art, installed as `dfhack-config/scripts/caustics_waves_art/`:
 
