@@ -122,8 +122,8 @@ def seafoam():
 
 
 CREST = [  # thickness px, colour of the line, trailing foam depth px, trough px in front of the line
-    (2.6, (84, 168, 180, 255), 2, 2), (3.0, (140, 202, 208, 255), 3, 2),
-    (3.0, LIGHT[:3] + (255,), 4, 2), (3.8, WHITE[:3] + (255,), 7, 2)]
+    (2.6, (84, 168, 180, 255), 2, 1), (3.0, (140, 202, 208, 255), 3, 1),
+    (3.0, LIGHT[:3] + (255,), 4, 1), (3.8, WHITE[:3] + (255,), 7, 1)]
 # (far-out crests thinner or see-through than this were invisible in game)
 # A dark band of water in front of the line: the trough the crest is about to roll into. It is opaque, so
 # it also hides the caustic lines right at the crest, which makes the crest look raised.
@@ -147,9 +147,11 @@ def crest_tile(white, frame):
     x = np.arange(T) + 0.5
     a = 2 * np.pi * frame / FR
     # the line passes through the same height at both tile edges in every frame, and sways in between
-    y0 = 15.5 + 2.6 * np.sin(a) * np.sin(np.pi * x / T) + 1.2 * np.sin(a + 1.9) * np.sin(2 * np.pi * x / T)
+    y0 = 15.5 + 3.4 * np.sin(a) * np.sin(np.pi * x / T) + 2.0 * np.sin(a + 1.9) * np.sin(2 * np.pi * x / T)
     grain = r.rand(T)
-    thick = th * (0.62 + 0.38 * np.sin(np.pi * x / T)) * (0.8 + 0.4 * grain)
+    # the line swells where it bulges forward and thins in the dips, so it reads as a wave, not a band
+    bulge = np.clip((15.5 - y0) / 3.4, -1, 1)
+    thick = th * (0.62 + 0.38 * np.sin(np.pi * x / T)) * (0.8 + 0.4 * grain) * (1 + 0.3 * bulge)
     out = np.zeros((T, T, 4), np.uint8)
     speck = clumps(70 + white)
     # the trail is the line's own colour, then halfway to the water (LIGHT and HALO looked grey behind
