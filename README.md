@@ -51,6 +51,12 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
   covers the caustic lines at the crest and the crest looks raised), and behind it a short trail of foam
   clumps in the line's own colour instead of single-pixel speckle. From two other models' advice; their
   further suggestions not done: uneven lumps instead of the regular sway, no white on the far-out stage.
+- Boulders on or beside a wave: the first floor layer under the boulder gets the same animated wash tile as
+  the tiles around it (`riverbase.png`, the flat tile used before, is loaded but no longer drawn). The wash
+  caustics run over a boulder under a wave like over any other wave tile, so it reads as under water. The olive square under a dry boulder is the
+  game's own floor for that stone (still there with `WAVES = false`).
+- The game puts almost no wave flows on bare stone floor (2 of 35 such tiles in one high-tide view), only
+  spray, which the game itself draws as blue streaks. Those tiles stay rock with a rim, as islands in the wash.
 - A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 

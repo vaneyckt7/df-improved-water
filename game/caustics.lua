@@ -958,6 +958,9 @@ end
 --   fringes      rock and sea tiles beside the wash, with the sides and corners that face it
 --   boulders     boulders in or beside the wash
 --   whitecaps    the spray that's over a wave or the sea, last so it covers the rest
+local ALL_SIDES_WET = 0
+for _, side in ipairs(SIDES) do ALL_SIDES_WET = ALL_SIDES_WET | side.bit end
+
 local function plan_river(waves, foam, spray, z)
     local pieces = {}
 
@@ -1096,8 +1099,17 @@ local function plan_river(waves, foam, spray, z)
         pieces[#pieces + 1] = fringe_piece
     end
     for _, boulder in ipairs(boulder_list) do
-        -- the boulder is drawn on the second floor layer, over this one
-        pieces[#pieces + 1] = piece(boulder.x, boulder.y, 'under_boulder', 1, 0, 'under')
+        -- The boulder is drawn on the second floor layer, over this one. Under it goes the same
+        -- wash as on the tiles around it (same colour, same moving pattern), not a flat square.
+        local x, y = boulder.x, boulder.y
+        local touches_sea = false
+        for _, side in ipairs(SIDES) do
+            if terrain_at(x + side.dx, y + side.dy, z) == 'sea' then touches_sea = true end
+        end
+        local facing = shore_facing(x, y, z).flow
+        local dir = FLOW_DIRECTIONS[facing]
+        pieces[#pieces + 1] = piece(x, y, 'wash', wash_row(touches_sea, ALL_SIDES_WET, facing),
+            -(x * dir.dx + y * dir.dy), 'under')
     end
 
     -- Spray shows as whitecaps only on the water: over a wave or the sea. Whitecaps join up
