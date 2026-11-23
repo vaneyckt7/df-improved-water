@@ -63,10 +63,11 @@ SEA_WASH = 20
 -- The wash is lighter than the sea (about RGB 20,114,127 with the recoloured Flowing Waves sheets), and by
 -- the blend above the sea's line colours come out DARKER than it (measured: lines grey on the wash). These
 -- stronger ones lift it instead: level 1 line, 2 bright, 3 glint, 4 very faint, 5 white.
--- TRIAL: colour of the crossings (level 5) on the sea only; ponds and rivers keep STILL_CROSS. White there
--- comes out grey (about 69,110,113 on sea of 1,86,94); this is aqua, about 29,126,130. false = as on ponds.
-SEA_CROSS = 0x99FFFF50
-WASH_COLS = {0x91FFFF40, 0x9EFFFF50, 0xADFFFFA0, 0x85FFFF40, 0xADFFFF60}   -- lifts of about +19, +28, +42, +10, +42; crossings aqua, not white (white came out grey)
+-- The sea's own colours (ponds and rivers keep theirs): level 1 line, 2 bright, 3 glint, 4 very faint halo,
+-- 5 crossing. Lines and halo as on a pond (30% fainter lines left little web between the crossings); crossings are aqua and
+-- lighter than the lines, about 33,127,132 on sea of 1,82,92 (white there came out grey, about 69,110,113). false = as on ponds.
+SEA_COLS = {STILL_FAINT, HI, GLINT, STILL_VFAINT, 0x9EFFFF58}
+WASH_COLS = {0x91FFFF40, 0x9EFFFF50, 0xADFFFFA0, 0x85FFFF40, 0xB8FFFF70}   -- lifts of about +19, +28, +42, +10, +42; crossings aqua, not white (white came out grey)
 state = state or {}
 state.sets = state.sets or {}            -- frame sets keyed by flow direction
 state.stats = state.stats or {n=0, us=0}
@@ -152,7 +153,7 @@ local function load_still()
 end
 local function build_still_frame(data, o, ox, oy, wash)
     ox, oy = ox or 0, oy or 0
-    local pix, base, col = {}, o * N * N, wash == 'wash' and {[0] = 0, WASH_COLS[1], WASH_COLS[2], WASH_COLS[3], WASH_COLS[4], WASH_COLS[5]} or {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, wash == 'sea' and SEA_CROSS or STILL_CROSS, STILL_SHADOW, RING_COLS[1], RING_COLS[2], RING_COLS[3], RING_COLS[4], RING_COLS[5], RING_COLS[6]}
+    local pix, base, col = {}, o * N * N, wash == 'wash' and {[0] = 0, WASH_COLS[1], WASH_COLS[2], WASH_COLS[3], WASH_COLS[4], WASH_COLS[5]} or wash == 'sea' and {[0] = 0, SEA_COLS[1], SEA_COLS[2], SEA_COLS[3], SEA_COLS[4], SEA_COLS[5]} or {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS, STILL_SHADOW, RING_COLS[1], RING_COLS[2], RING_COLS[3], RING_COLS[4], RING_COLS[5], RING_COLS[6]}
     for y = 0, N - 1 do
         local sy = (y - oy) % N
         local row = {data:byte(base + sy * N + 1, base + sy * N + N)}
@@ -545,7 +546,7 @@ function CausticsOverlay:onRenderFrame()
         local p = list[i]
         local key = p[3]
         -- the sea: still-water pattern, no rings
-        if key == 'sea' and not SEA_CROSS then key = 'none' end
+        if key == 'sea' and not SEA_COLS then key = 'none' end
         local tp = texpos[key]
         if tp == nil then
             local set = state.sets[key]
