@@ -47,6 +47,10 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
 
 - Only the two freshest foam stages are bright solid foam. The game leaves foam on the sand long after the
   water has pulled back, so older stages are thin strands that break into crumbs.
+- Crests (`swell.png`): a 2 px dark band of water in front of the line (the trough; it is opaque, so it also
+  covers the caustic lines at the crest and the crest looks raised), and behind it a short trail of foam
+  clumps in the line's own colour instead of single-pixel speckle. From two other models' advice; their
+  further suggestions not done: uneven lumps instead of the regular sway, no white on the far-out stage.
 - A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 

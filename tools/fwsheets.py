@@ -121,15 +121,28 @@ def seafoam():
     return bleed(sheet, RESIDUE)
 
 
-CREST = [  # thickness px, colour of the line, trailing speckle depth px, share of the line drawn
-    (2.6, (84, 168, 180, 255), 2, 1.0), (3.0, (140, 202, 208, 255), 3, 1.0),
-    (3.0, LIGHT[:3] + (255,), 4, 1.0), (3.8, WHITE[:3] + (255,), 7, 1.0)]
+CREST = [  # thickness px, colour of the line, trailing foam depth px, trough px in front of the line
+    (2.6, (84, 168, 180, 255), 2, 2), (3.0, (140, 202, 208, 255), 3, 2),
+    (3.0, LIGHT[:3] + (255,), 4, 2), (3.8, WHITE[:3] + (255,), 7, 2)]
 # (far-out crests thinner or see-through than this were invisible in game)
+# A dark band of water in front of the line: the trough the crest is about to roll into. It is opaque, so
+# it also hides the caustic lines right at the crest, which makes the crest look raised.
+TROUGH = (4, 62, 74, 255)
+
+
+def clumps(seed):
+    """trailing foam in small clumps stretched along the crest (3 px long, 1 px deep), not single-px grit"""
+    r = np.random.RandomState(seed)
+    rows = []
+    for _ in range(T):
+        shift = r.randint(3)
+        rows.append(np.repeat(r.rand(T // 3 + 2), 3)[shift:shift + T])
+    return np.array(rows)
 
 
 def crest_tile(white, frame):
-    """heading north: crisp leading edge on the north side, ragged trail to the south"""
-    th, col, trail, share = CREST[white]
+    """heading north: dark trough and crisp leading edge on the north side, clumpy foam trail to the south"""
+    th, col, trail, trough = CREST[white]
     r = np.random.RandomState(40 + white)
     x = np.arange(T) + 0.5
     a = 2 * np.pi * frame / FR
@@ -137,21 +150,25 @@ def crest_tile(white, frame):
     y0 = 15.5 + 2.6 * np.sin(a) * np.sin(np.pi * x / T) + 1.2 * np.sin(a + 1.9) * np.sin(2 * np.pi * x / T)
     grain = r.rand(T)
     thick = th * (0.62 + 0.38 * np.sin(np.pi * x / T)) * (0.8 + 0.4 * grain)
-    drawn = np.cos(2 * np.pi * (x / T * 3 + r.rand()) + 0.6 * np.sin(a)) < 2 * share - 1 + 0.001
     out = np.zeros((T, T, 4), np.uint8)
-    speck = np.random.RandomState(70 + white).rand(T, T)
+    speck = clumps(70 + white)
+    # the trail is the line's own colour, then halfway to the water (LIGHT and HALO looked grey behind
+    # the blue far-out crests in game)
+    near = col if white < 2 else LIGHT[:3] + (255,)
+    far = tuple((c + w) // 2 for c, w in zip(near[:3], WASH)) + (255,)
     for xi in range(T):
-        if not drawn[xi]:
-            continue
         top = y0[xi] - thick[xi] / 2
         for yi in range(T):
             d = yi + 0.5 - top
-            if 0 <= d < thick[xi]:
+            if -trough <= d < 0:
+                out[yi, xi] = TROUGH
+            elif 0 <= d < thick[xi]:
                 out[yi, xi] = col if d < thick[xi] * 0.75 or white < 2 else LIGHT
             elif trail and thick[xi] <= d < thick[xi] + trail:
                 fade = (d - thick[xi]) / trail
-                if speck[(yi + frame // 4) % T, xi] > 0.45 + 0.5 * fade:
-                    out[yi, xi] = LIGHT if fade < 0.4 else HALO
+                # the clumps drift back off the crest over the loop
+                if speck[(yi - frame // 4) % T, xi] > 0.45 + 0.5 * fade:
+                    out[yi, xi] = near if fade < 0.4 else far
     return out
 
 
