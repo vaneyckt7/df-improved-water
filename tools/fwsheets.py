@@ -166,6 +166,56 @@ def swell():
     return bleed(sheet, LIGHT[:3])
 
 
+# Rock beside the wash. The game hardly ever puts a wave on smooth stone floor, so the wash stops dead at
+# the rock's edge. The mod draws this sheet on the rock tile: row = mask of the sides and corners facing
+# the wash (N=1 E=2 S=4 W=8 NE=16 NW=32 SE=64 SW=128), every tile on the same frame. Here: the water laps
+# a few px onto the rock, with a line of foam at its rim. Opaque, see the note at RESIDUE.
+WASH = (20, 114, 127)   # the wash colour set with fwtint.py
+LIP = 4.0               # px the water reaches onto the rock at the tile's ends (and the corner radius)
+
+
+def fringe_tile(mask, frame):
+    a = 2 * np.pi * frame / FR
+    px, py = xx + 0.5, yy + 0.5
+    water = np.zeros((T, T), bool)
+    # distance from the side, position along it, phase
+    for bit, d, t, ph in ((1, py, px, 0.0), (2, T - px, py, 1.7), (4, T - py, px, 3.1), (8, px, py, 4.6)):
+        if mask & bit:
+            u = t / T
+            reach = LIP + (2.6 + 1.6 * np.sin(a + ph)) * np.sin(np.pi * u) ** 2 \
+                + 1.3 * np.sin(a * 2 + ph) * np.sin(2 * np.pi * u) * np.sin(np.pi * u)
+            water |= d < reach
+    for bit, cx, cy, s1, s2 in ((16, T, 0, 1, 2), (32, 0, 0, 1, 8), (64, T, T, 4, 2), (128, 0, T, 4, 8)):
+        if mask & bit and not mask & (s1 | s2):
+            water |= np.hypot(px - cx, py - cy) < LIP
+    # where two wet sides meet, the rock's corner is rounded off instead of left as a point
+    R = 6.0
+    for s1, s2, cx, cy in ((1, 2, T, 0), (1, 8, 0, 0), (4, 2, T, T), (4, 8, 0, T)):
+        if mask & s1 and mask & s2:
+            ax, ay = np.abs(px - cx), np.abs(py - cy)
+            water |= (ax < LIP + R) & (ay < LIP + R) & (np.hypot(ax - LIP - R, ay - LIP - R) > R)
+    # foam: the water's rim toward the rock, 2 px, with small gaps
+    pad = np.pad(water, 2, mode='edge')
+    near_rock = np.zeros((T, T), bool)
+    for dy in range(-2, 3):
+        for dx in range(-2, 3):
+            if dx * dx + dy * dy <= 4:
+                near_rock |= ~pad[2 + dy:2 + dy + T, 2 + dx:2 + dx + T]
+    gaps = np.random.RandomState(11 + mask).rand(T, T) < 0.25
+    out = np.zeros((T, T, 4), np.uint8)
+    out[water] = WASH + (255,)
+    out[water & near_rock & ~gaps] = RESIDUE + (255,)
+    return out
+
+
+def rockfringe():
+    sheet = np.zeros((256 * T, FR * T, 4), np.uint8)
+    for mask in range(256):
+        for f in range(FR):
+            sheet[mask * T:(mask + 1) * T, f * T:(f + 1) * T] = fringe_tile(mask, f)
+    return bleed(sheet, RESIDUE)
+
+
 def preview(foam, crest, path):
     """a mock beach: foam patches with their real joined sides over sand and sea, and rows of crests"""
     W, H = 22, 14
@@ -208,5 +258,7 @@ if __name__ == '__main__':
     foam, crest = seafoam(), swell()
     Image.fromarray(foam).save(os.path.join(out, 'seafoam.png'))
     Image.fromarray(crest).save(os.path.join(out, 'swell.png'))
+    fringe = rockfringe()
+    Image.fromarray(fringe).save(os.path.join(out, 'riverfringe.png'))
     if len(sys.argv) > 2:
         preview(foam, crest, sys.argv[2])

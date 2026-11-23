@@ -18,12 +18,14 @@ below the interface layer other overlays paint on, so the waves and foam of the 
 Workshop 3829998283) show over them. `false` paints on the interface layer as before.
 
 `game/flowing_waves_art/` holds replacement art for that mod, in the mod's own sheet layout: `seafoam.png`
-(foam on the beach and spray) and `swell.png` (crests out at sea). Built by `tools/fwsheets.py`:
+(foam on the beach and spray), `swell.png` (crests out at sea) and `riverfringe.png` (drawn by the mod on rock
+and pebble tiles beside the wash: the water laps a few px onto the rock, with a foam rim; the game hardly
+ever puts a wave on smooth stone, so without it the wash stops in a straight line there). Built by `tools/fwsheets.py`:
 
     python fwsheets.py ../game/flowing_waves_art preview.png
 
-To install, keep a copy of the mod's own `art/seafoam.png` and `art/swell.png`, copy ours over them and run
-`flowing_waves reload` in DFHack. To go back, restore the two files and reload again. A Workshop update of
+To install, keep a copy of the mod's own `art/seafoam.png`, `art/swell.png` and `art/riverfringe.png`, copy ours over them and run
+`flowing_waves reload` in DFHack. To go back, restore the files and reload again. A Workshop update of
 the mod overwrites them. Notes from testing in game:
 
 - Only the two freshest foam stages are bright solid foam. The game leaves foam on the sand long after the
@@ -34,7 +36,8 @@ the mod overwrites them. Notes from testing in game:
 `tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet`, `riverfringe`, `riverseafringe`,
 `riverbase`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
 the mod's originals and writes into the mod's `art/` folder; the results are the mod author's art recoloured
-and are not kept here.
+and are not kept here. It also writes a recoloured `riverfringe.png`: copy ours over it again afterwards. The
+wash colour is repeated in `fwsheets.py` (`WASH`).
 
     python -I fwtint.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes
     python -I fwtint.py <mod>/art_original <mod>/art - 0.7        # keep the colours, 70% of the opacity
