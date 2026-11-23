@@ -548,6 +548,7 @@ local SHORE_RADIUS = 10       -- how far to look for the sea when working out wh
 local FOAM_STAGES = 8         -- stages of the foam's life: 0 (nearly gone) to 7 (fresh)
 local FOAM_VARIANTS = 4       -- different patches, picked by tile position
 local SPRAY_FULL = 100        -- spray density drawn as fresh foam
+local WHITECAP_MAX_STAGE = 3  -- spray on the water is drawn no heavier than this foam stage (thin strands)
 local WAVE_FOAM_BELOW = 20    -- wave density below which the wash has broken up into foam
 
 local SWELL_WHITENESS = 4     -- swell sheet rows per heading: 0 far out to 3 about to break
@@ -991,6 +992,14 @@ local function plan_river(waves, foam, spray, z)
     end
 
     -- A foam patch runs into neighbouring foam and waves; towards bare ground it frays out.
+    -- Foam is what the water leaves behind: none on a tile a wave is covering, none on the sea.
+    local left_behind = {}
+    for _, patch in ipairs(foam) do
+        if not has_wave(patch.x, patch.y) and terrain_at(patch.x, patch.y, z) ~= 'sea' then
+            left_behind[#left_behind + 1] = patch
+        end
+    end
+    foam = left_behind
     local foam_at = {}
     for _, patch in ipairs(foam) do foam_at[tile_key(patch.x, patch.y, 0)] = true end
     for _, patch in ipairs(foam) do
@@ -1032,6 +1041,26 @@ local function plan_river(waves, foam, spray, z)
                     local fringe = fringe_at[key]
                     if not fringe then
                         fringe = {x = fx, y = fy, sides_facing_water = 0, is_sea = kind == 'sea'}
+                        fringe_at[key] = fringe
+                        fringe_list[#fringe_list + 1] = fringe
+                    end
+                    fringe.sides_facing_water = add_bit(fringe.sides_facing_water, dir.bit)
+                end
+            end
+        end
+    end
+    -- A boulder on or beside a wave gets water under it (below), so to the land next to it that
+    -- boulder is water too: the rim also runs along the side facing the boulder.
+    for _, boulder in ipairs(boulder_list) do
+        for _, dir in ipairs(SIDES_AND_CORNERS) do
+            local fx, fy = boulder.x - dir.dx, boulder.y - dir.dy
+            if not has_wave(fx, fy) then
+                local kind = terrain_at(fx, fy, z)
+                if kind == 'rock' or kind == 'dry_beach' then
+                    local key = tile_key(fx, fy, 0)
+                    local fringe = fringe_at[key]
+                    if not fringe then
+                        fringe = {x = fx, y = fy, sides_facing_water = 0, is_sea = false}
                         fringe_at[key] = fringe
                         fringe_list[#fringe_list + 1] = fringe
                     end
@@ -1088,8 +1117,9 @@ local function plan_river(waves, foam, spray, z)
                 joined_sides = add_bit(joined_sides, side.bit)
             end
         end
-        pieces[#pieces + 1] = piece(x, y, 'sea_foam', foam_row(patch.stage, joined_sides, x, y),
-            x * 3 + y * 5, 'top')
+        -- never the solid patches of fresh beach foam: on the water those read as foam left on sand
+        pieces[#pieces + 1] = piece(x, y, 'sea_foam',
+            foam_row(math.min(patch.stage, WHITECAP_MAX_STAGE), joined_sides, x, y), x * 3 + y * 5, 'top')
     end
 
     return pieces
