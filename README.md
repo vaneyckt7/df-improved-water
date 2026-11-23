@@ -2,7 +2,7 @@
 
 `game/` holds the files as installed in `<Dwarf Fortress>/dfhack-config/scripts/`:
 
-- `caustics.lua` - the overlay script (river pattern is generated in Lua; still water plays baked frames)
+- `caustics.lua` - the overlay script: caustics and ocean waves (river pattern is generated in Lua; still water plays baked frames)
 - `caustics_still.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint line, 2-3 bright, 4 very faint, 5 white, 6 shadow)
 - `caustics_rings.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
 - `caustics_fields.bin` - data for the river pattern
@@ -13,20 +13,36 @@ removed after commit c8352cc; its data files and tools (`caustics_swell.bin`, `c
 `caustics_sea_*.bin`, `wavetiles.lua`, `tools/wavegif.py`, `swell.py`, `wavetile.py`, `seagif.py`) are still
 in the repo but no longer used by the script.
 
-`UNDER_LAYER` in the script: the caustics are written to the map viewport layer `screentexpos_signpost`,
-below the interface layer other overlays paint on, so the waves and foam of the Flowing Waves mod (Steam
-Workshop 3829998283) show over them. `false` paints on the interface layer as before.
+The script also draws the ocean's waves (`WAVES = true` in the script; `false` = caustics only): the wash on
+the beach, foam, crests out at sea and spray. That part is the script of the Flowing Waves mod 1.3 by Poss
+(Steam Workshop 3829998283), copied into `caustics.lua` and changed. It is the mod author's work; ask them
+before publishing this anywhere. With it in our script, keep the mod's own overlay off
+(`overlay disable flowing_waves.waves`), or both draw. Commands: `caustics waves` (status),
+`caustics river|auto|side|up` (style), `caustics reload` (reload the wave art), `caustics timing`.
 
-`game/flowing_waves_art/` holds replacement art for that mod, in the mod's own sheet layout: `seafoam.png`
-(foam on the beach and spray), `swell.png` (crests out at sea) and `riverfringe.png` (drawn by the mod on rock
-and pebble tiles beside the wash: the water laps a few px onto the rock, with a foam rim; the game hardly
-ever puts a wave on smooth stone, so without it the wash stops in a straight line there). Built by `tools/fwsheets.py`:
+Layers: the caustics are written to the map viewport layer `screentexpos_signpost` (`UNDER_LAYER`; `false`
+paints on the interface layer instead). The waves use the layers the mod used: `screentexpos_background`
+(water under boulders), `screentexpos_background_two` (wash and foam, where that slot is free) and the
+interface layer (everything else), so waves and foam show over the caustics.
 
-    python fwsheets.py ../game/flowing_waves_art preview.png
+Added to the mod's logic: all natural ground that touches the open sea (rock, pebbles, sand, soil, grass,
+boulders; not built floors) gets the rock rim, not only rock beside the wash. The game's own frayed sand
+edge on the sea tiles beside it is switched off. The sea tiles come from the caustics' own scan of the view. The wash no longer draws the mod's
+foam band inside the water tile against sand: sand beside the wash gets the same rim, so the foam line runs on
+unbroken from the wash to the sea.
 
-To install, keep a copy of the mod's own `art/seafoam.png`, `art/swell.png` and `art/riverfringe.png`, copy ours over them and run
-`flowing_waves reload` in DFHack. To go back, restore the files and reload again. A Workshop update of
-the mod overwrites them. Notes from testing in game:
+`game/caustics_waves_art/` holds the wave art, installed as `dfhack-config/scripts/caustics_waves_art/`:
+
+- ours, built by `tools/fwsheets.py`: `seafoam.png` (foam on the beach and spray), `swell.png` (crests out at
+  sea) and `riverfringe.png` (rock and pebble tiles beside the water: the water laps a few px onto the rock,
+  with a foam rim)
+- the mod author's, recoloured with `tools/fwtint.py`: `riversheet.png`, `riverseafringe.png`, `riverbase.png`
+- the mod author's, unchanged: `sidesheet.png`, `upsheet.png` (the older crest styles)
+
+    python fwsheets.py ../game/caustics_waves_art preview.png
+
+Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a wave is lit), `SEA_COLS` and
+`WASH_COLS` (the caustic colours on the sea and on the lighter wash) are in the script. Notes from testing in game:
 
 - Only the two freshest foam stages are bright solid foam. The game leaves foam on the sand long after the
   water has pulled back, so older stages are thin strands that break into crumbs.
@@ -35,8 +51,8 @@ the mod overwrites them. Notes from testing in game:
 
 `tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet`, `riverfringe`, `riverseafringe`,
 `riverbase`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
-the mod's originals and writes into the mod's `art/` folder; the results are the mod author's art recoloured
-and are not kept here. It also writes a recoloured `riverfringe.png`: copy ours over it again afterwards. The
+the mod's originals and writes into an output folder (the copies in `game/caustics_waves_art/` were made this way). It also writes a recoloured
+`riverfringe.png`: do not copy that one over ours. The
 wash colour is repeated in `fwsheets.py` (`WASH`).
 
     python -I fwtint.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes
