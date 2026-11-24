@@ -782,8 +782,9 @@ local wave_count = 0
 local foam_x, foam_y, foam_stage, foam_count = {}, {}, {}, 0
 -- the sea foam tiles of the last scan (their keys in foam_seen), for a look that skips the scan
 local foam_full, foam_full_count = {}, 0
--- all the flows in the scanned blocks at the last scan, alive or not: how many, and their densities added up
-local flows_listed, flows_density = 0, 0
+-- all the flows in the scanned blocks at the last scan, alive or not: how many, their densities added up,
+-- and the same sum with each density times its place in the lists
+local flows_listed, flows_density, flows_weighted = 0, 0, 0
 local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 -- one number per flow found (what it is, where, its stage), to tell whether anything has changed
 local found, found_count = {}, 0
@@ -796,7 +797,7 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     local zkey = z * 16777216
     local waves, foams, sprays, n, same = 0, 0, 0, 0, true
     local remembered = 0
-    local listed, density_sum = 0, 0
+    local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
             local block = getTileBlock(block_x, block_y, z)
@@ -804,11 +805,13 @@ local function find_flows(x1, y1, x2, y2, z, tick)
             if flows then
                 -- (indexed: ipairs over one of the game's lists takes four times as long per item)
                 local count = #flows
+                local place = listed + 1
                 listed = listed + count
                 for i = 0, count - 1 do
                     local flow = flows[i]
                     local density = flow.density
                     density_sum = density_sum + density
+                    weighted = weighted + density * (place + i)
                     local flow_type = density > 0 and flow.type
                     if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
                         -- (a block's flows are all on the block's own level)
@@ -862,7 +865,7 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     if n ~= found_count then same = false end
     wave_count, foam_count, spray_count, found_count = waves, foams, sprays, n
     foam_full_count = remembered
-    flows_listed, flows_density = listed, density_sum
+    flows_listed, flows_density, flows_weighted = listed, density_sum, weighted
     seen_waves.n, seen_waves.z, seen_waves.tick = waves, z, tick
     seen_waves.x1, seen_waves.y1, seen_waves.x2, seen_waves.y2 = x1, y1, x2, y2
     return same
@@ -870,22 +873,28 @@ end
 
 -- Between the game's own flow updates (see FLOW_TICKS) a flow can still start: steam where magma meets
 -- water, on any tick. The game then adds a flow, or brings a spent one back to full, or tops one up: each
--- raises the densities added up. This reads only that, a fraction of a scan. Returns whether the blocks'
--- flows are as the last scan found them.
+-- raises the densities added up. Other kinds of flow (fire, dust, smoke) fade on any tick too, so a second
+-- sum weighs each density by its place, lest a fade cancel a start. This reads the densities only.
+-- Returns whether the blocks' flows are as the last scan found them.
 local function flows_untouched(x1, y1, x2, y2, z)
-    local listed, density_sum = 0, 0
+    local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
             local block = getTileBlock(block_x, block_y, z)
             local flows = block and block.flows
             if flows then
                 local count = #flows
+                local place = listed + 1
                 listed = listed + count
-                for i = 0, count - 1 do density_sum = density_sum + flows[i].density end
+                for i = 0, count - 1 do
+                    local density = flows[i].density
+                    density_sum = density_sum + density
+                    weighted = weighted + density * (place + i)
+                end
             end
         end
     end
-    return listed == flows_listed and density_sum == flows_density
+    return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
 end
 
 ----------------------------------------------------------------------------------------------
