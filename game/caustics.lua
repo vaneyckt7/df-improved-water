@@ -1,33 +1,17 @@
 --@module = true
--- Prototype: "caustics" on water tiles. Two tileable 128px fields drift with the
--- river's flow while sliding sideways against each other; pixels are lit only where both
--- are bright, snapped to two levels.
+-- Caustics on water tiles, and the ocean's waves, wash, foam and spray (the WAVES part below).
+-- Water plays 128 frames baked offline (caustics_still.bin). Still water and the sea play them in place;
+-- flowing water carries them along with the flow.
 local overlay = require('plugins.overlay')
 local guidm = require('gui.dwarfmode')
 
-local N, TP, STEPS = 128, 32, 128       -- pattern size, tile px, loop length (1px per step)
-STEP_MS = 80
-WIDTH = 7                                -- web line width in px
+local N, TP, STEPS = 128, 32, 128       -- pattern size, tile px, loop length
+STEP_MS = 80                             -- flowing water's pace on a map without a river
 -- Packed 0xAABBGGRR. Measured blend (2026-11-18): out = colour*a^2 + background*(1-a),
--- so alpha below ~0.4 darkens dark water instead of lighting it. These lift river water
--- by roughly +25 (HI) and +14 (LO) per channel.
+-- so alpha below ~0.4 darkens dark water instead of lighting it.
 HI = 0x84FFFF50
-LO = 0x76FFFF40
--- Glint: near-white speck in the very brightest strand cores (about 3-4 px per tile,
--- measured on the field file). Lifts water by roughly +50 per channel.
 GLINT = 0xB0FFFFE0
--- Still water: a fuller, calmer net with no glints. STILL_GATE is how much of the web the
--- gate lets through (0 = river-like fragments, 120+ = the whole net).
-STILL_GATE, STILL_SWAY, STILL_GATE_R = 115, 3, 20
--- Still water is mostly glints: the net is reduced to faint thin cores, and STILL_GLINTS
--- fixed points per 4x4 tiles each swell from a dot to a small cross and fade again,
--- 2 or 3 times per loop (about 5-7 s each), all out of step with one another.
-STILL_GLINTS = 30
--- how bright a strand core must be to show at all on still water (175 = as on the river)
-STILL_T = 180
-GLINT_DIM = 0x94FFFFA8
--- Still water, simulated frames: level 1 is a faint net, levels 2-3 (HI, GLINT) are the bright
--- points where its lines meet.
+-- Levels in the baked frames: 1 is a faint net, 2-3 (HI, GLINT) the bright points where its lines meet.
 STILL_FAINT = 0x64FFFF40
 STILL_VFAINT = 0x57FFFF40   -- level 4: very faint long lines under the streaks
 STILL_CROSS = 0x84FFFFFF    -- level 5: where two still-water lines overlap: white, same strength as HI (rings keep HI/GLINT)
@@ -39,33 +23,27 @@ RING_COLS = {0x87FDEE3A, 0x80F9EB3B, 0x75FFF03C, 0x70F9E935, 0x69FDEA2E, 0x63FDE
 -- RING_CHANCE is the chance (per 1000) that a tile plays each ring slot it is offered; every
 -- tile is offered 4 slots per loop, so 1000 tiles of pond show about 4 * RING_CHANCE rings a loop.
 RING_CHANCE = 15
--- TRIAL: flowing water plays the still-water frames, carried along with the flow at this many px per step
--- (0 = the river's own generated pattern). Whole numbers only, so the 128-step loop closes without a jump.
+-- Flowing water: the frames are carried along with the flow at FLOW_STILL px per step, and the pattern itself
+-- changes FLOW_ANIM frames per step, so its own shimmer is not drowned out by the drift. Whole numbers only,
+-- so the 128-step loop closes without a jump.
 FLOW_STILL = 1
--- TRIAL: on flowing water the pattern itself changes this many still-water frames per step (1 = as on the pond),
--- so its own shimmer is not drowned out by the drift. Whole numbers only.
 FLOW_ANIM = 2
--- TRIAL: where two flow directions meet, the tiles on both sides of the border show both directions' patterns
--- together, each one step fainter, so lines fade across the border instead of being cut off at it.
-FLOW_FADE = true
--- TRIAL: true = on those border tiles each pattern is one step fainter; false = both at full strength.
-FLOW_FADE_DIM = false
+-- Where two flow directions meet, the tiles on both sides of the border show both directions' patterns
+-- together, so lines fade across the border instead of being cut off at it.
 -- true = the water stands still while the game is paused and carries on from the same frame after.
 PAUSE_FREEZE = true
 -- Sea water (salt, not flowing, on a map that has ocean waves) shows the still-water caustics without rings.
--- UNDER_LAYER: map viewport layer the caustics are written to, below the interface layer that overlays such as
--- Flowing Waves paint on, so their waves and foam show over the caustics. false = paint on the interface layer.
+-- UNDER_LAYER: map viewport layer the caustics are written to, below the interface layer the waves and foam
+-- are painted on, so those show over the caustics.
 UNDER_LAYER = 'screentexpos_signpost'
 -- SEA_WASH: also light the wave water that washes over the beach (OceanWave flows at least this dense; the
--- Flowing Waves mod draws thinner ones as foam). false = sea tiles only. Tiles holding an item, creature or
--- building are left alone.
+-- thinner ones are drawn as foam). false = sea tiles only. Tiles holding an item, creature or building are
+-- left alone.
 SEA_WASH = 20
--- The wash is lighter than the sea (about RGB 20,114,127 with the recoloured Flowing Waves sheets), and by
--- the blend above the sea's line colours come out DARKER than it (measured: lines grey on the wash). These
--- stronger ones lift it instead: level 1 line, 2 bright, 3 glint, 4 very faint, 5 white.
--- The sea's own colours (ponds and rivers keep theirs): level 1 line, 2 bright, 3 glint, 4 very faint halo,
--- 5 crossing. Lines and halo as on a pond (30% fainter lines left little web between the crossings); crossings are aqua and
--- lighter than the lines, about 33,127,132 on sea of 1,82,92 (white there came out grey, about 69,110,113). false = as on ponds.
+-- The wash is lighter than the sea (about RGB 20,114,127), and by the blend above the sea's line colours come
+-- out DARKER than it (measured: lines grey on the wash). These stronger ones lift it instead.
+-- Both: level 1 line, 2 bright, 3 glint, 4 very faint halo, 5 crossing. On the sea the crossings are aqua and
+-- lighter than the lines, about 33,127,132 on sea of 1,82,92 (white there came out grey, about 69,110,113).
 SEA_COLS = {STILL_FAINT, HI, GLINT, STILL_VFAINT, 0x9EFFFF58}
 WASH_COLS = {0x91FFFF40, 0x9EFFFF50, 0xADFFFFA0, 0x85FFFF40, 0xB8FFFF70}   -- lifts of about +19, +28, +42, +10, +42; crossings aqua, not white (white came out grey)
 -- WAVES: also draw the ocean's waves, wash, foam and spray (see the WAVES part below). false = caustics only.
@@ -74,6 +52,7 @@ state = state or {}
 state.sets = state.sets or {}            -- frame sets keyed by flow direction
 state.stats = state.stats or {n=0, us=0}
 state.clock = state.clock or dfhack.getTickCount()   -- ms of animation time
+if state.layout ~= 2 then state.cache, state.layout = nil, 2 end   -- (older versions kept another water list)
 
 -- df.tile_liquid_flow_dir -> screen vector (north is y-1)
 local DIRS = {
@@ -81,66 +60,59 @@ local DIRS = {
     southeast={1, 1}, southwest={-1, 1}, north={0, -1},
 }
 
-local webs
-local function web(seed)
-    local rng = dfhack.random.new(seed)
-    local px, py = {}, {}
-    for i = 1, 14 do px[i] = rng:drandom() * N; py[i] = rng:drandom() * N end
-    local w = {}
-    for y = 0, N - 1 do
-        for x = 0, N - 1 do
-            local d1, d2 = 1e9, 1e9
-            for i = 1, 14 do
-                local dx = math.abs(x - px[i]); if dx > N / 2 then dx = N - dx end
-                local dy = math.abs(y - py[i]); if dy > N / 2 then dy = N - dy end
-                local d = math.sqrt(dx * dx + dy * dy)
-                if d < d1 then d2 = d1; d1 = d elseif d < d2 then d2 = d end
-            end
-            w[y * N + x] = math.max(0, 1 - (d2 - d1) / WIDTH)
+-- Reading one field of a game object costs about as much as ten Lua table lookups, so what can be worked
+-- out once is: per flow direction and per tile type here, and a tile's flags are read whole and tested by bit.
+local FLOW_FX, FLOW_FY, FLOWING = {}, {}, {}   -- by df.tile_liquid_flow_dir value
+for value = df.tile_liquid_flow_dir._first_item, df.tile_liquid_flow_dir._last_item do
+    local name = df.tile_liquid_flow_dir[value]
+    local v = DIRS[name]
+    if v then
+        local n = (v[1] ~= 0 and v[2] ~= 0) and 0.7071 or 1
+        FLOW_FX[value], FLOW_FY[value] = v[1] * n, v[2] * n
+    end
+    -- 'none' / 'down' = river water with no direction of its own (the column where a river leaves the
+    -- map): it takes the direction of the river water around it. Ponds are 'inactive' and stay still.
+    FLOWING[value] = (v or name == 'none' or name == 'down') and true or nil
+end
+-- df.tile_designation and df.tile_occupancy bits (measured in game)
+local D_FLOW, D_HIDDEN, D_MAGMA, D_SALT = 0x7, 0x200, 0x200000, 0x80000000
+local O_BUILDING, O_UNIT, O_TAKEN = 0x7, 0x18, 0x3F   -- unit: standing or lying; taken: building, creature or item
+-- Tile kinds for the waves
+local K_SEA, K_BOULDER, K_BEACH, K_ROCK, K_OTHER = 1, 2, 3, 4, 5
+local OPEN = {}         -- tile type -> true: open space or the top of a ramp (what lies below shows through)
+local LAND_KIND = {}    -- tile type -> its kind when there is no water in it
+local WASH_UNDER = {}   -- tile type -> true: driftwood, shrub or sapling (the game draws it above the first floor layer)
+local BUILT = {}        -- tile type -> true: a construction
+do
+    local attrs, shapes, materials = df.tiletype.attrs, df.tiletype_shape, df.tiletype_material
+    -- Ground the wash thins out on. Rock and the sea don't stop the water.
+    local beach = {
+        [materials.SOIL] = true, [materials.DRIFTWOOD] = true,
+        [materials.GRASS_LIGHT] = true, [materials.GRASS_DARK] = true,
+        [materials.GRASS_DRY] = true, [materials.GRASS_DEAD] = true,
+    }
+    for tiletype = df.tiletype._first_item, df.tiletype._last_item do
+        if df.tiletype[tiletype] then
+            local shape, material = attrs[tiletype].shape, attrs[tiletype].material
+            local plant = shape == shapes.SHRUB or shape == shapes.SAPLING
+            OPEN[tiletype] = (shape == shapes.EMPTY or shape == shapes.RAMP_TOP) or nil
+            WASH_UNDER[tiletype] = (material == materials.DRIFTWOOD or plant) or nil
+            BUILT[tiletype] = material == materials.CONSTRUCTION or nil
+            -- shrubs and saplings count as beach: they get the rim beside the water like the sand around them
+            LAND_KIND[tiletype] = shape == shapes.BOULDER and K_BOULDER
+                or (shape == shapes.FLOOR and beach[material] or plant) and K_BEACH
+                or (shape == shapes.FLOOR or shape == shapes.PEBBLES) and K_ROCK
+                or K_OTHER
         end
     end
-    return w
 end
+local WAVE_FOAM_BELOW = 20    -- wave density below which the wash has broken up into foam
+-- The wave flows found by the waves' last scan (see the WAVES part), shared with the caustics' wash.
+local seen_waves = {n = 0, x = {}, y = {}, key = {}, density = {}}
 
--- Bake the frame loop for one flow direction. Field A moves at 2*flow+side, field B at
--- 2*flow-side, so the lit overlap travels with the flow and still shimmers. Still water
--- (dir 'none') keeps the two sliding against each other with no net drift.
+-- Bake animation frame o (0-based) of one direction's loop from caustics_still.bin: STEPS frames of
+-- N x N bytes, 0 = unlit, 1-6 = level. Without that file there are no caustics.
 -- Old textures are never freed: deleteHandle crashed DF (access violation, 2026-11-18).
--- The two fields come from caustics_fields.bin (2 x 128x128 bytes, made offline: warped
--- Voronoi strands gated by broad soft bands). Without the file, fall back to plain webs.
-local T_LO, T_HI = 136, 175
-local T_GL = 215
-local function load_fields()
-    local f = io.open(dfhack.getDFPath() .. '/dfhack-config/scripts/caustics_fields.bin', 'rb')
-    local data = f and f:read('a')
-    if f then f:close() end
-    if not data or #data ~= 2 * N * N then
-        T_LO, T_HI, T_GL = 77, 153, 250
-        local A, B = web(3), web(11)
-        for k = 0, N * N - 1 do A[k] = A[k] * 255; B[k] = B[k] * 255 end
-        return {A, B}
-    end
-    local out = {}
-    for k = 0, 1 do
-        local w = {}
-        for i = 0, N * N - 1 do w[i] = data:byte(k * N * N + i + 1) end
-        out[k + 1] = w
-    end
-    return out
-end
-
-local function wobble(amp, k, ko, o, phase_deg)
-    local t = {}
-    for i = 0, N - 1 do
-        t[i] = math.floor(amp * math.sin(2 * math.pi * (k * i + ko * o) / N + math.rad(phase_deg)) + 0.5)
-    end
-    return t
-end
-
--- Bake animation frame o (0-based) of one direction's loop.
--- Still water plays frames baked offline from a simulation of light refracted through a calm
--- surface (caustics_still.bin: STEPS frames of N x N bytes, 0 = unlit, 1-3 = brightness level).
--- If the file is missing or the wrong size, the procedural pattern below is used instead.
 local still_data
 local function load_still()
     if still_data == nil then
@@ -165,21 +137,21 @@ local function build_still_frame(data, o, ox, oy, wash)
     return dfhack.textures.createTileset(pix, N, N, TP, TP)
 end
 
--- Border between two flow directions: both patterns, each one step fainter (white -> line -> very faint -> off).
-local DIMMED = FLOW_FADE_DIM and {[0] = 0, 4, 1, 1, 0, 1, 0} or {[0] = 0, 1, 2, 3, 4, 5, 6}
+-- Border between two flow directions: both patterns, the brighter one on top.
 local RANK = {[0] = 0, 2, 3, 4, 1, 3, 0}
-local function build_mix_frame(data, o, da, db, anim, drift)
-    anim, drift = anim or FLOW_ANIM, drift or FLOW_STILL
-    local pix, base = {}, (o * anim % STEPS) * N * N
+local function build_mix_frame(data, o, da, db)
+    local pix, base = {}, (o * FLOW_ANIM % STEPS) * N * N
     local col = {[0] = 0, STILL_FAINT, HI, GLINT, STILL_VFAINT, STILL_CROSS, STILL_SHADOW}
-    local ax, ay, bx, by = da[1] * drift * o, da[2] * drift * o, db[1] * drift * o, db[2] * drift * o
+    local ax, ay, bx, by = da[1] * FLOW_STILL * o, da[2] * FLOW_STILL * o, db[1] * FLOW_STILL * o, db[2] * FLOW_STILL * o
     for y = 0, N - 1 do
         local sa, sb = (y - ay) % N, (y - by) % N
         local ra = {data:byte(base + sa * N + 1, base + sa * N + N)}
         local rb = {data:byte(base + sb * N + 1, base + sb * N + N)}
         local at = y * N
         for x = 1, N do
-            local a, b = DIMMED[ra[(x - 1 - ax) % N + 1]] or 0, DIMMED[rb[(x - 1 - bx) % N + 1]] or 0
+            local a, b = ra[(x - 1 - ax) % N + 1], rb[(x - 1 - bx) % N + 1]
+            if a > 6 then a = 0 end
+            if b > 6 then b = 0 end
             pix[at + x] = col[RANK[a] >= RANK[b] and a or b]
         end
     end
@@ -241,81 +213,12 @@ local function bake_ring()
     end
 end
 
-local function build_frame(dir, o)
+local function build_frame(data, dir, o)
     local da, db = dir:match('^(%a+)%+(%a+)$')
-    if da then
-        local data = load_still()
-        if data then return build_mix_frame(data, o, DIRS[da], DIRS[db]) end
-        dir = da
-    end
-    if not DIRS[dir] then
-        local data = load_still()
-        if data then return build_still_frame(data, o, 0, 0, dir == 'wash' and 'wash' or dir == 'sea' and 'sea' or nil) end
-    end
-    if DIRS[dir] and FLOW_STILL > 0 then
-        local data = load_still()
-        if data then return build_still_frame(data, o * FLOW_ANIM % STEPS, DIRS[dir][1] * FLOW_STILL * o, DIRS[dir][2] * FLOW_STILL * o) end
-    end
-    webs = webs or load_fields()
-    local A, B = webs[1], webs[2]
+    if da then return build_mix_frame(data, o, DIRS[da], DIRS[db]) end
     local d = DIRS[dir]
-    local ax, ay, bx, by
-    if d then
-        ax, ay, bx, by = 2 * d[1] - d[2], 2 * d[2] + d[1], 2 * d[1] + d[2], 2 * d[2] - d[1]
-    else
-        ax, ay, bx, by = 0, 0, 0, 0
-    end
-    -- per-frame offsets. Flowing water drifts steadily. Still water does not travel: the web
-    -- sways on a small circle while its soft gate circles the other way, so parts of the net
-    -- slowly light up and dim in place.
-    local oxa, oya, oxb, oyb = ax * o, ay * o, bx * o, by * o
-    local gate, glint_at, sway = 0, T_GL, 1
-    local c_hi, c_lo, t_hi = HI, LO, T_HI
-    if not d then
-        local th = 2 * math.pi * o / STEPS
-        oxa, oya = math.floor(STILL_SWAY * math.cos(th) + 0.5), math.floor(STILL_SWAY * math.sin(th) + 0.5)
-        oxb, oyb = math.floor(STILL_GATE_R * math.cos(1 - th) + 0.5), math.floor(STILL_GATE_R * math.sin(1 - th) + 0.5)
-        gate, glint_at, sway = STILL_GATE, 256, 0.5
-        c_hi, c_lo, t_hi = HI, 0, STILL_T
-    end
-    do
-        -- small two-axis sways so the strands bend as they travel
-        local axw, ayw = wobble(2.0 * sway, 3, 3, o, 0), wobble(1.5 * sway, 2, -2, o, 90)      -- A: x by row, y by column
-        local byw, bxw = wobble(2.0 * sway, 3, 2, o, 45), wobble(1.5 * sway, 2, -3, o, 200)   -- B: y by column, x by row
-        local pix = {}
-        for y = 0, N - 1 do
-            local xa, xb = -oxa + axw[y], -oxb + bxw[y]
-            local ya, yb = y - oya, y - oyb
-            local row = y * N + 1
-            for x = 0, N - 1 do
-                local a = A[((ya + ayw[x]) % N) * N + (x + xa) % N]
-                local b = B[((yb + byw[x]) % N) * N + (x + xb) % N] + gate
-                local c = a < b and a or b
-                pix[row + x] = c >= t_hi and (c >= glint_at and GLINT or c_hi) or (c >= T_LO and c_lo or 0)
-            end
-        end
-        if not d then
-            local function put(x, y, v) pix[(y % N) * N + x % N + 1] = v end
-            local seed = 20261119
-            local function rnd(n) seed = (seed * 1103515245 + 12345) % 2147483648; return (seed >> 8) % n end
-            for _ = 1, STILL_GLINTS do
-                local gx, gy, ph, cyc = rnd(N), rnd(N), rnd(64) / 64, 2 + rnd(2)
-                local s = math.sin(2 * math.pi * (cyc * o / STEPS + ph))
-                if s > 0.2 then
-                    put(gx, gy, s > 0.55 and GLINT or GLINT_DIM)
-                    if s > 0.55 then
-                        put(gx - 1, gy, GLINT_DIM); put(gx + 1, gy, GLINT_DIM)
-                        put(gx, gy - 1, GLINT_DIM); put(gx, gy + 1, GLINT_DIM)
-                    end
-                    if s > 0.9 then
-                        put(gx - 1, gy, GLINT); put(gx + 1, gy, GLINT)
-                        put(gx - 2, gy, GLINT_DIM); put(gx + 2, gy, GLINT_DIM)
-                    end
-                end
-            end
-        end
-        return dfhack.textures.createTileset(pix, N, N, TP, TP)
-    end
+    if d then return build_still_frame(data, o * FLOW_ANIM % STEPS, d[1] * FLOW_STILL * o, d[2] * FLOW_STILL * o) end
+    return build_still_frame(data, o, 0, 0, dir)   -- 'none', 'sea' or 'wash'
 end
 
 -- Baking a whole loop takes ~0.7 s, so it is spread over render frames: bake_some() adds
@@ -323,21 +226,24 @@ end
 BAKE_PER_FRAME = 2
 state.partial = state.partial or {}
 local function bake_some(dir, budget)
+    local data = load_still()
+    if not data then
+        if not state.warned then
+            state.warned = true
+            dfhack.printerr('caustics: caustics_still.bin is missing or the wrong size; no caustics drawn')
+        end
+        return 0
+    end
     local part = state.partial[dir] or {}
     state.partial[dir] = part
     while budget > 0 and #part < STEPS do
-        part[#part + 1] = build_frame(dir, #part)
+        part[#part + 1] = build_frame(data, dir, #part)
         budget = budget - 1
     end
     if #part == STEPS then
         state.sets[dir], state.partial[dir] = part, nil
     end
     return budget
-end
-
-function build(dir)  -- bake a whole direction at once (blocks for ~0.7 s)
-    bake_some(dir, STEPS)
-    return state.sets[dir]
 end
 
 -- Which visible tiles show water (looking down through open space), each with a drift
@@ -381,60 +287,84 @@ local function sea_key()
     if not f.waves and #df.global.world.event.ocean_waves > 0 then f.waves = true end
     return f.waves and 'sea'
 end
+
+-- The visible water, grouped by what it plays: state.cache.groups[key] = {n, x, y, k, at}, with key a drift
+-- direction ('north', 'east+north' on a border), 'none' (still), 'sea' or 'wash'; k is the tile's place in
+-- the 4x4-tile pattern and at its index into the map's screen layers for the view it was scanned in.
 local function water_map(vp)
-    local z0 = df.global.window_z
-    local key = ('%d,%d,%d,%d,%d'):format(vp.x1, vp.y1, vp.x2, vp.y2, z0)
+    local z0 = vp.z
+    local x1, y1, x2, y2 = vp.x1, vp.y1, vp.x2, vp.y2
     local now = dfhack.getTickCount()
+    local same_view = state.vx1 == x1 and state.vy1 == y1 and state.vx2 == x2 and state.vy2 == y2 and state.z == z0
     -- rescan at most every 500 ms for a still view, and every 100 ms while panning (the
     -- list holds map coordinates, so a slightly stale one only misses newly exposed tiles)
+    -- (while the game is paused the water stands still: then once a second for a still view)
     if state.cache then
         local age = now - state.cache_at
-        if age < 100 and state.z == z0 or age < 500 and state.key == key then return state.cache end
+        if age < 100 and state.z == z0 or age < 500 and same_view
+                or age < 1000 and same_view and state.cache_tick == df.global.cur_year_tick and df.global.pause_state then
+            return state.cache
+        end
     end
     local getFlags, getType, getBlock = dfhack.maps.getTileFlags, dfhack.maps.getTileType, dfhack.maps.getTileBlock
-    local attrs, OPEN, RAMP_TOP = df.tiletype.attrs, df.tiletype_shape.EMPTY, df.tiletype_shape.RAMP_TOP
-    local names = df.tile_liquid_flow_dir
     local sea = sea_key()
     local M = SMOOTH + 1
-    local W = vp.x2 - vp.x1 + 1 + 2 * M
-    local fx, fy, water = {}, {}, {}
-    for y = vp.y1 - M, vp.y2 + M do
-        for x = vp.x1 - M, vp.x2 + M do
-            for z = z0, math.max(0, z0 - 4), -1 do
-                local d, occ = getFlags(x, y, z)
-                if not d or d.hidden then break end
-                -- a bridge or other building here covers whatever is below it
-                if occ.building ~= 0 then break end
-                if d.flow_size > 0 then
-                    if not d.liquid_type then  -- false = water
-                        local k = (y - vp.y1 + M) * W + (x - vp.x1 + M)
+    local W = x2 - x1 + 1 + 2 * M
+    local zmin = math.max(0, z0 - 4)
+    local fx, fy, water, flow_tables = {}, {}, {}, {}
+    -- what shows at one tile, looking down through open space
+    local function look(x, y)
+        for z = z0, zmin, -1 do
+            local d, occ = getFlags(x, y, z)
+            if not d then return end
+            local des = d.whole
+            if des & D_HIDDEN ~= 0 then return end
+            -- a bridge or other building here covers whatever is below it
+            local taken = occ.whole
+            if taken & O_BUILDING ~= 0 then return end
+            if des & D_FLOW ~= 0 then
+                if des & D_MAGMA == 0 then
+                    local k = (y - y1 + M) * W + (x - x1 + M)
+                    local block_key = (x >> 4) + (y >> 4) * 4096 + z * 16777216
+                    local flows = flow_tables[block_key]
+                    if flows == nil then
                         local b = getBlock(x, y, z)
-                        local nm = b and names[b.liquid_flow[x % 16][y % 16].perm_flow_dir]
-                        local v = DIRS[nm]
-                        -- 'none' / 'down' = river water with no direction of its own (the column where
-                        -- a river leaves the map): it takes the direction of the river water around
-                        -- it. Ponds are 'inactive' and stay still.
-                        local flowing = v or nm == 'none' or nm == 'down'
-                        -- 1 = flowing, 2 = still, 3 = creature in the tile (leave it unlit), 4 = sea
-                        water[k] = (occ.unit or occ.unit_grounded) and 3 or (flowing and 1 or (sea and d.water_salt) and 4 or 2)
-                        if v then
-                            local n = (v[1] ~= 0 and v[2] ~= 0) and 0.7071 or 1
-                            fx[k], fy[k] = v[1] * n, v[2] * n
-                        end
+                        flows = b and b.liquid_flow or false
+                        flow_tables[block_key] = flows
                     end
-                    break
+                    local dir = flows and flows[x & 15][y & 15].perm_flow_dir
+                    local flowing = dir and FLOWING[dir]
+                    -- 1 = flowing, 2 = still, 3 = creature in the tile (leave it unlit), 4 = sea
+                    water[k] = taken & O_UNIT ~= 0 and 3 or (flowing and 1 or (sea and des & D_SALT ~= 0) and 4 or 2)
+                    if flowing and FLOW_FX[dir] then fx[k], fy[k] = FLOW_FX[dir], FLOW_FY[dir] end
                 end
-                local tt = getType(x, y, z)
-                if not tt then break end
-                local sh = attrs[tt].shape
-                if sh ~= OPEN and sh ~= RAMP_TOP then break end
+                return
+            end
+            local tt = getType(x, y, z)
+            if not tt or not OPEN[tt] then return end
+        end
+    end
+    -- The view and one tile around it. Only flowing water needs the wider margin (its drift is averaged
+    -- over the water within SMOOTH tiles), so that is looked at only when there is some.
+    local any_flowing = false
+    for y = y1 - 1, y2 + 1 do
+        for x = x1 - 1, x2 + 1 do
+            look(x, y)
+            if water[(y - y1 + M) * W + (x - x1 + M)] == 1 then any_flowing = true end
+        end
+    end
+    if any_flowing then
+        for y = y1 - M, y2 + M do
+            local inside = y >= y1 - 1 and y <= y2 + 1
+            for x = x1 - M, x2 + M do
+                if not (inside and x >= x1 - 1 and x <= x2 + 1) then look(x, y) end
             end
         end
     end
     local dm = {}
-    for y = vp.y1 - 1, vp.y2 + 1 do
-        for x = vp.x1 - 1, vp.x2 + 1 do
-            local cy, cx = y - vp.y1 + M, x - vp.x1 + M
+    for y = y1 - 1, y2 + 1 do
+        for x = x1 - 1, x2 + 1 do
+            local cy, cx = y - y1 + M, x - x1 + M
             local kind = water[cy * W + cx]
             if kind == 2 then
                 -- still water (ponds, pools) never borrows a neighbouring river's drift
@@ -458,51 +388,82 @@ local function water_map(vp)
             end
         end
     end
-    local list = {}
-    local fade = FLOW_FADE and FLOW_STILL > 0
+    local mvp = df.global.gps.main_viewport
+    local dim_x, dim_y = mvp.dim_x, mvp.dim_y
+    local cache = {n = 0, groups = {}, order = {}, x1 = x1, y1 = y1, dim_x = dim_x, dim_y = dim_y, fits = true}
+    local groups, order = cache.groups, cache.order
+    local function add(x, y, key)
+        local g = groups[key]
+        if not g then
+            g = {n = 0, x = {}, y = {}, k = {}, at = {}}
+            groups[key] = g
+            order[#order + 1] = key
+        end
+        local n = g.n + 1
+        local sx, sy = x - x1, y - y1
+        if sx >= dim_x or sy >= dim_y then cache.fits = false end
+        g.n, g.x[n], g.y[n], g.k[n], g.at[n] = n, x, y, (y % 4) * 4 + (x % 4) + 1, sx * dim_y + sy
+        cache.n = cache.n + 1
+    end
     local NB = {-W - 1, -W, -W + 1, -1, 1, W - 1, W, W + 1}
-    for y = vp.y1, vp.y2 do
-        for x = vp.x1, vp.x2 do
-            local at = (y - vp.y1 + M) * W + (x - vp.x1 + M)
+    for y = y1, y2 do
+        for x = x1, x2 do
+            local at = (y - y1 + M) * W + (x - x1 + M)
             local d = dm[at]
             if d then
-                if fade and DIRS[d] then
+                if DIRS[d] then
                     for i = 1, 8 do
                         local nd = dm[at + NB[i]]
                         if nd and nd ~= d and DIRS[nd] then d = d < nd and d .. '+' .. nd or nd .. '+' .. d; break end
                     end
                 end
-                list[#list + 1] = {x, y, d}
+                add(x, y, d)
             end
         end
     end
     if sea and SEA_WASH then
-        local WAVE = df.flow_type.OceanWave
-        for by = vp.y1 - vp.y1 % 16, vp.y2, 16 do
-            for bx = vp.x1 - vp.x1 % 16, vp.x2, 16 do
-                local block = getBlock(bx, by, z0)
-                for _, flow in ipairs(block and block.flows or {}) do
-                    if flow.type == WAVE and flow.density >= SEA_WASH then
-                        local pos = flow.pos
-                        local x, y = pos.x, pos.y
-                        if pos.z == z0 and x >= vp.x1 and x <= vp.x2 and y >= vp.y1 and y <= vp.y2 then
-                            local at = (y - vp.y1 + M) * W + (x - vp.x1 + M)
-                            if not dm[at] and not water[at] then
-                                local d, occ = getFlags(x, y, z0)
-                                if d and not d.hidden and occ.building == 0
-                                    and not (occ.item or occ.unit or occ.unit_grounded) then
-                                    dm[at] = 'wash'
-                                    list[#list + 1] = {x, y, 'wash'}
-                                end
-                            end
+        local function wash(x, y)
+            if x >= x1 and x <= x2 and y >= y1 and y <= y2 then
+                local at = (y - y1 + M) * W + (x - x1 + M)
+                if not dm[at] and not water[at] then
+                    local d, occ = getFlags(x, y, z0)
+                    if d and d.whole & D_HIDDEN == 0 and occ.whole & O_TAKEN == 0 then
+                        dm[at] = 'wash'
+                        add(x, y, 'wash')
+                    end
+                end
+            end
+        end
+        local sw = seen_waves
+        if WAVES and SEA_WASH >= WAVE_FOAM_BELOW and sw.z == z0
+                and sw.x1 == x1 and sw.y1 == y1 and sw.x2 == x2 and sw.y2 == y2 then
+            -- the waves' scan has just read these flows
+            local wx, wy, density = sw.x, sw.y, sw.density
+            for i = 1, sw.n do
+                if density[i] >= SEA_WASH then wash(wx[i], wy[i]) end
+            end
+        else
+            local WAVE = df.flow_type.OceanWave
+            for by = y1 - y1 % 16, y2, 16 do
+                for bx = x1 - x1 % 16, x2, 16 do
+                    local block = getBlock(bx, by, z0)
+                    local flows = block and block.flows
+                    for i = 0, flows and #flows - 1 or -1 do
+                        local flow = flows[i]
+                        if flow.type == WAVE and flow.density >= SEA_WASH then
+                            local pos = flow.pos
+                            if pos.z == z0 then wash(pos.x, pos.y) end
                         end
                     end
                 end
             end
         end
     end
-    state.cache, state.key, state.cache_at, state.z = list, key, now, z0
-    return list
+    if not same_view then state.view_id = (state.view_id or 0) + 1 end   -- a number that changes with the view
+    state.vx1, state.vy1, state.vx2, state.vy2 = x1, y1, x2, y2
+    state.cache, state.cache_at, state.z = cache, now, z0
+    state.cache_tick = df.global.cur_year_tick
+    return cache
 end
 
 ----------------------------------------------------------------------------------------------
@@ -515,27 +476,24 @@ end
 --
 -- The game simulates waves washing up beaches as OceanWave and SeaFoam flows. ASCII mode draws
 -- them, but graphics mode has no FLOW_ token for them, so they're invisible there. This part
--- finds those flows on the visible z-level every RESCAN_MS and draws water where they are:
+-- finds those flows on the visible z-level and draws water where they are:
 --   crests       on each incoming wave crossing the sea (the game keeps these apart from the flows)
---   wash         on every wave tile, with foam and rounded corners where it meets dry beach. A wave
---                that has thinned below WAVE_FOAM_BELOW is drawn as foam instead.
---   rock fringe  on rock beside the wash: the water laps onto the rock, with a foam rim
+--   wash         on every wave tile. A wave that has thinned below WAVE_FOAM_BELOW is drawn as foam instead.
+--   rock fringe  on land beside the wash or the sea: the water laps onto it, with a foam rim
 --   sea fringe   on sea beside the wash, so the wash runs into the sea without a seam
 --   boulders     in or beside the wash: water swapped into the floor layer under the boulder
 --   sea foam     on each SeaFoam tile: a still patch of bubbles that pop as the flow's density falls
 --   spray        on each Steam flow over a wave or the sea, as whitecaps
--- The older 'side'/'up' styles draw the wave-crest sheets on each wave tile instead.
 --
--- Every RESCAN_MS the flows are found and every tile planned (a "piece": sheet, row, layer, animation
--- offset); when the picture changes the pieces become a draw list; every frame the list is written.
+-- Every RESCAN_MS the flows are read. When they, the terrain or the view have changed, every tile is
+-- planned again (a "piece": sheet, row, layer, animation offset); when the picture changes the pieces
+-- become a draw list; every frame the list is written. All of these are kept as parallel arrays that are
+-- filled again in place, not as a table per tile.
 --
 --   caustics waves                  show status
---   caustics river|auto|side|up     wave style: river water (default), or the crest sheets
 --   caustics reload                 reload the wave art, e.g. after rebuilding it
 --   caustics timing                 time spent scanning, planning and drawing waves
 ----------------------------------------------------------------------------------------------
-local wave_painter
-local WAVE_FLOWS = {[df.flow_type.OceanWave] = true, [df.flow_type.SeaFoam] = true}
 do
 local FRAMES = 16             -- every animation is 16 frames
 local TICKS_PER_FRAME = 10    -- the brook animation's pace: about 10 frames a second
@@ -549,39 +507,29 @@ local FOAM_STAGES = 8         -- stages of the foam's life: 0 (nearly gone) to 7
 local FOAM_VARIANTS = 4       -- different patches, picked by tile position
 local SPRAY_FULL = 100        -- spray density drawn as fresh foam
 local WHITECAP_MAX_STAGE = 3  -- spray on the water is drawn no heavier than this foam stage (thin strands)
-local WAVE_FOAM_BELOW = 20    -- wave density below which the wash has broken up into foam
 
 local SWELL_WHITENESS = 4     -- swell sheet rows per heading: 0 far out to 3 about to break
 
-
-style = style or 'river'
+local getTileFlags, getTileType, getTileBlock = dfhack.maps.getTileFlags, dfhack.maps.getTileType, dfhack.maps.getTileBlock
+local getTexposByHandle = dfhack.textures.getTexposByHandle
 
 ----------------------------------------------------------------------------------------------
 -- Directions
 ----------------------------------------------------------------------------------------------
 
--- The four sides and four corners of a tile, with the bit each one has in the sheets' masks.
-local N  = {dx =  0, dy = -1, bit = 1}
-local E  = {dx =  1, dy =  0, bit = 2}
-local S  = {dx =  0, dy =  1, bit = 4}
-local W  = {dx = -1, dy =  0, bit = 8}
-local NE = {dx =  1, dy = -1, bit = 16}
-local NW = {dx = -1, dy = -1, bit = 32}
-local SE = {dx =  1, dy =  1, bit = 64}
-local SW = {dx = -1, dy =  1, bit = 128}
-local HERE = {dx = 0, dy = 0}
-local SIDES = {N, E, S, W}
-local SIDES_AND_CORNERS = {N, E, S, W, NE, NW, SE, SW}
-local HERE_AND_SIDES = {HERE, N, E, S, W}
+-- A tile is known by x + y * 4096 (plus z * 16777216 where the level matters), so its neighbours' keys
+-- are a fixed step away. The four sides and four corners of a tile, in the order N, E, S, W, NE, NW, SE,
+-- SW, with the bit each one has in the sheets' masks:
+local DX = {0, 1, 0, -1, 1, -1, 1, -1}
+local DY = {-1, 0, 1, 0, -1, -1, 1, 1}
+local DKEY = {-4096, 1, 4096, -1, -4095, -4097, 4097, 4095}
+local BIT = {1, 2, 4, 8, 16, 32, 64, 128}
+local ALL_SIDES_WET = 15
 
 -- The eight ways river water can flow, in the order vanilla's FLOWS page (and so the wash sheet)
--- stores them.
-local FLOW_DIRECTIONS = {NW, NE, SE, SW, N, S, W, E}
-
-local function add_bit(mask, bit)
-    if (mask // bit) % 2 == 0 then return mask + bit end
-    return mask
-end
+-- stores them: NW, NE, SE, SW, N, S, W, E.
+local FLOW_DX = {-1, 1, 1, -1, 0, 0, -1, 1}
+local FLOW_DY = {-1, -1, 1, 1, -1, 1, 0, 0}
 
 ----------------------------------------------------------------------------------------------
 -- Art
@@ -595,12 +543,15 @@ local art_dir = dfhack.getDFPath() .. '/dfhack-config/scripts/caustics_waves_art
 reload_count = reload_count or 0
 
 local function copy_file(from, to)
-    local input = assert(io.open(from, 'rb'))
+    local input = io.open(from, 'rb')
+    if not input then return false end
     local data = input:read('a')
     input:close()
-    local output = assert(io.open(to, 'wb'))
+    local output = io.open(to, 'wb')
+    if not output then return false end
     output:write(data)
     output:close()
+    return true
 end
 
 local function art_path(name)
@@ -608,7 +559,7 @@ local function art_path(name)
     local copies = art_dir .. 'reloaded/'
     dfhack.filesystem.mkdir(copies)
     local copy = copies .. reload_count .. '-' .. name
-    copy_file(art_dir .. name, copy)
+    if not copy_file(art_dir .. name, copy) then return art_dir .. name end
     os.remove(copies .. (reload_count - 1) .. '-' .. name)   -- the previous reload's copy
     return copy
 end
@@ -617,192 +568,187 @@ local function load_tiles(name)
     return dfhack.textures.loadTileset(art_path(name), 32, 32, true)
 end
 
--- Loaded on first use; `caustics reload` clears this.
+local SHEET_NAMES = {'wash', 'rock_fringe', 'sea_fringe', 'sea_foam', 'swell'}
+
+-- Loaded on first use; `caustics reload` clears this. A file that is missing or unreadable gives an empty
+-- sheet: then no waves are drawn (the caustics still are) and it is said once, until the next reload.
 local function load_sheets()
-    return {
-        side_crests = load_tiles('sidesheet.png'),
-        up_crests = load_tiles('upsheet.png'),
+    local loaded = {
         wash = load_tiles('riversheet.png'),
         rock_fringe = load_tiles('riverfringe.png'),
         sea_fringe = load_tiles('riverseafringe.png'),
-        under_boulder = load_tiles('riverbase.png'),
         sea_foam = load_tiles('seafoam.png'),
         swell = load_tiles('swell.png'),
     }
+    for _, name in ipairs(SHEET_NAMES) do
+        if not (loaded[name] and loaded[name][1]) then
+            loaded.missing = name
+            dfhack.printerr('caustics: wave art sheet "' .. name .. '" did not load from ' .. art_dir
+                .. ' - no waves are drawn (caustics reload tries again)')
+            break
+        end
+    end
+    return loaded
 end
 
 -- A tile's texture number can change when the game resets its textures, so DFHack says to ask
 -- for it rather than keep it. Asking is a call into the game, though, and a busy beach asks
--- for the same few hundred tiles thousands of times a second. So the answers are kept until
--- the next scan, at most RESCAN_MS: after a reset, the waves are wrong for that long at worst.
-local texpos_known = {}
+-- for the same few hundred tiles thousands of times a second. So the answers are kept, and dropped
+-- (texture_epoch goes up, and the draw lists are made again) once a second and whenever the first
+-- tile of any sheet is seen to have moved, which is checked every frame.
+local texpos_known, first_texpos = {}, {}
+texture_epoch = texture_epoch or 0
 
 local function forget_texposes()
-    texpos_known = {}
+    texture_epoch = texture_epoch + 1
+    for _, name in ipairs(SHEET_NAMES) do
+        texpos_known[name] = {}
+        first_texpos[name] = getTexposByHandle(sheets[name][1])
+    end
 end
 
-local function texture(tiles, index)
-    local known = texpos_known[tiles]
-    if not known then
-        known = {}
-        texpos_known[tiles] = known
+local function textures_moved()
+    for i = 1, #SHEET_NAMES do
+        local name = SHEET_NAMES[i]
+        if getTexposByHandle(sheets[name][1]) ~= first_texpos[name] then return true end
     end
-    local texpos = known[index]
-    if not texpos then
-        texpos = dfhack.textures.getTexposByHandle(tiles[index])
-        known[index] = texpos
-    end
-    return texpos
+    return false
 end
 
--- Each sheet holds rows of 16 frames, and the functions below give the tile number of a row's
--- first frame. A tile shows frame (step + frame_shift) % FRAMES of its row.
-
--- Wash sheet layout: for each (touches the sea?, sides where the water carries on, flow
--- direction) a row. Rows touching the sea are opaque on the sea side.
+-- Each sheet holds rows of 16 frames; a row is known by the tile number of its first frame. A tile
+-- shows frame (step + frame_shift) % FRAMES of its row.
+--   wash sheet    a row for each (touches the sea?, sides where the water carries on, flow direction).
+--                 Rows touching the sea are opaque on the sea side.
+--   fringe sheets (rock and sea alike) a row for each combination of sides and corners that face the wash
+--   foam sheet    a row for each (stage, sides joined to more foam or a wave, variant). The foam lies
+--                 still; the frames only add a little static.
+--   swell sheet   a row for each (heading, whiteness)
 local function wash_row(touches_sea, wet_sides, direction_index)
-    local row = ((touches_sea and 1 or 0) * 16 + wet_sides) * #FLOW_DIRECTIONS + (direction_index - 1)
-    return row * FRAMES + 1
+    return (((touches_sea and 1 or 0) * 16 + wet_sides) * 8 + (direction_index - 1)) * FRAMES + 1
 end
 
--- Fringe sheet layout (rock and sea alike): for each combination of sides and corners that face
--- the wash, a row.
-local function fringe_row(sides_facing_water)
-    return sides_facing_water * FRAMES + 1
-end
-
--- Foam sheet layout: for each (stage, sides joined to more foam or a wave, variant) a row. The
--- foam lies still; the frames only add a little static.
 local function foam_row(stage, joined_sides, x, y)
-    local variant = (x * 7 + y * 13) % FOAM_VARIANTS
-    local row = (stage * 16 + joined_sides) * FOAM_VARIANTS + variant
-    return row * FRAMES + 1
+    return ((stage * 16 + joined_sides) * FOAM_VARIANTS + (x * 7 + y * 13) % FOAM_VARIANTS) * FRAMES + 1
 end
 
--- Swell sheet layout: for each (heading, whiteness) a row.
-local SWELL_HEADINGS = {north = 0, south = 1, east = 2, west = 3}
-local function swell_row(heading, whiteness)
-    return (SWELL_HEADINGS[heading] * SWELL_WHITENESS + whiteness) * FRAMES + 1
-end
+local HEADING_NORTH, HEADING_SOUTH, HEADING_EAST, HEADING_WEST = 0, 1, 2, 3
 
 ----------------------------------------------------------------------------------------------
 -- Terrain
 ----------------------------------------------------------------------------------------------
 
--- Ground the wash thins out on, with foam at its edge. Rock and the sea don't stop the water.
-local BEACH_MATERIALS = {
-    [df.tiletype_material.SOIL] = true, [df.tiletype_material.DRIFTWOOD] = true,
-    [df.tiletype_material.GRASS_LIGHT] = true, [df.tiletype_material.GRASS_DARK] = true,
-    [df.tiletype_material.GRASS_DRY] = true, [df.tiletype_material.GRASS_DEAD] = true,
-}
-
-local function is_water(flags)
-    return flags and flags.flow_size > 0 and not flags.liquid_type
-end
-
+-- The sea is water on this level, or open space with water just below it. That includes
+-- the tops of ramps sloping down into the sea, which vanilla draws as sand at the waterline.
 local function classify(tiletype, x, y, z)
-    if not tiletype then return 'other' end
-    local attrs = df.tiletype.attrs[tiletype]
-    local shape, material = attrs.shape, attrs.material
-    -- The sea is water on this level, or open space with water just below it. That includes
-    -- the tops of ramps sloping down into the sea, which vanilla draws as sand at the waterline.
-    if is_water(dfhack.maps.getTileFlags(x, y, z)) then return 'sea' end
-    if (shape == df.tiletype_shape.EMPTY or shape == df.tiletype_shape.RAMP_TOP)
-            and is_water(dfhack.maps.getTileFlags(x, y, z - 1)) then
-        return 'sea'
+    if not tiletype then return K_OTHER end
+    local d = getTileFlags(x, y, z)
+    if d then
+        local des = d.whole
+        if des & D_FLOW ~= 0 and des & D_MAGMA == 0 then return K_SEA end
     end
-    if shape == df.tiletype_shape.BOULDER then return 'boulder' end
-    if shape == df.tiletype_shape.FLOOR and BEACH_MATERIALS[material] then return 'dry_beach' end
-    -- shrubs and saplings count as beach: they get the rim beside the water like the sand around them
-    if shape == df.tiletype_shape.SHRUB or shape == df.tiletype_shape.SAPLING then return 'dry_beach' end
-    if (shape == df.tiletype_shape.FLOOR or shape == df.tiletype_shape.PEBBLES)
-            and not BEACH_MATERIALS[material] then
-        return 'rock'
-    end
-    return 'other'
-end
-
-local function is_driftwood(x, y, z)
-    local tiletype = dfhack.maps.getTileType(x, y, z)
-    return tiletype and df.tiletype.attrs[tiletype].material == df.tiletype_material.DRIFTWOOD
-end
-
--- Shrubs and saplings: like driftwood, the game draws them above the first floor layer.
-local function is_plant(x, y, z)
-    local tiletype = dfhack.maps.getTileType(x, y, z)
-    local shape = tiletype and df.tiletype.attrs[tiletype].shape
-    return shape == df.tiletype_shape.SHRUB or shape == df.tiletype_shape.SAPLING
-end
-
-local function tile_key(x, y, z)
-    return x + y * 4096 + z * 16777216
-end
-
--- Classifying a tile takes a few lookups, so the answer is kept with the tile's type. The type
--- is checked again once per round of TERRAIN_RECHECK_MS (digging, building and channelling
--- change it, but not often), and if it has changed the tile is classified again. A change can also move the shoreline, so it clears the
--- shore directions worked out from that tile.
-terrain_cache = terrain_cache or {}
-shore_cache = shore_cache or {}
-scan_number = scan_number or 0
-terrain_round = terrain_round or 0
-
-local function forget_shores_near(x, y, z)
-    for dy = -SHORE_RADIUS, SHORE_RADIUS do
-        for dx = -SHORE_RADIUS, SHORE_RADIUS do
-            shore_cache[tile_key(x + dx, y + dy, z)] = nil
+    if OPEN[tiletype] then
+        d = getTileFlags(x, y, z - 1)
+        if d then
+            local des = d.whole
+            if des & D_FLOW ~= 0 and des & D_MAGMA == 0 then return K_SEA end
         end
     end
+    return LAND_KIND[tiletype]
 end
 
-local function terrain_at(x, y, z)
-    local key = tile_key(x, y, z)
-    local known = terrain_cache[key]
-    if known and known.checked == terrain_round then return known.kind end
-    -- Classified afresh every round, not only when the tile type changes: whether a tile is sea
-    -- depends on the water in it or just below it, which comes and goes without the type changing.
-    local tiletype = dfhack.maps.getTileType(x, y, z)
-    local kind = classify(tiletype, x, y, z)
-    if known then
-        if known.kind ~= kind or known.tiletype ~= tiletype then forget_shores_near(x, y, z) end
-        known.tiletype, known.kind, known.checked = tiletype, kind, terrain_round
-    else
-        terrain_cache[key] = {tiletype = tiletype, kind = kind, checked = terrain_round}
+-- Classifying a tile takes a few calls into the game, so the answer is kept for one round of
+-- TERRAIN_RECHECK_MS (kind_now, for the level being drawn). It is worked out afresh every round, not only
+-- when the tile type changes: whether a tile is sea depends on the water in it or just below it, which
+-- comes and goes without the type changing. If a tile's kind or type is not what it was last time
+-- (known_kind, known_type), the shoreline may have moved, so the shore directions worked out from
+-- around that tile are dropped.
+kind_now = kind_now or {}
+known_kind = known_kind or {}
+known_type = known_type or {}
+shore_flow = shore_flow or {}
+terrain_round = terrain_round or 0
+plan_number = plan_number or 0
+local level, level_key = -1, 0        -- the level kind_now is for
+local shores_moved = false
+-- A wave tile's wash depends only on the ground around it, so it too is kept for the round: the first
+-- tile of its row (0 on a boulder: no wash piece), its frame shift and its layer.
+local wash_first, wash_shift, wash_layer = {}, {}, {}
+
+local function terrain_miss(x, y, key)
+    local tiletype = getTileType(x, y, level)
+    local kind = classify(tiletype, x, y, level)
+    local full = key + level_key
+    local was = known_kind[full]
+    if was and (was ~= kind or known_type[full] ~= tiletype) then
+        shores_moved = true
+        for dy = -SHORE_RADIUS, SHORE_RADIUS do
+            local row = full + dy * 4096
+            for dx = -SHORE_RADIUS, SHORE_RADIUS do shore_flow[row + dx] = nil end
+        end
     end
+    known_kind[full], known_type[full] = kind, tiletype
+    kind_now[key] = kind
     return kind
 end
 
--- Which way a shore faces, from the sea within SHORE_RADIUS (nearer sea counts for more):
---   flow:   index into FLOW_DIRECTIONS of the direction pointing away from the sea
---   crests: 'up' if the sea lies mostly north or south, 'side' if east or west
-local function shore_facing(x, y, z)
-    local key = tile_key(x, y, z)
-    if shore_cache[key] then return shore_cache[key] end
-
+-- Which way a shore faces, from the sea within SHORE_RADIUS (nearer sea counts for more): the index
+-- into the flow directions of the one pointing away from the sea.
+local function shore_miss(x, y, full)
     local toward_sea_x, toward_sea_y = 0, 0
     for dy = -SHORE_RADIUS, SHORE_RADIUS do
+        local ny = y + dy
+        local row = ny * 4096
         for dx = -SHORE_RADIUS, SHORE_RADIUS do
-            if (dx ~= 0 or dy ~= 0) and terrain_at(x + dx, y + dy, z) == 'sea' then
-                local distance_squared = dx * dx + dy * dy
-                toward_sea_x = toward_sea_x + dx / distance_squared
-                toward_sea_y = toward_sea_y + dy / distance_squared
+            if dx ~= 0 or dy ~= 0 then
+                local nx = x + dx
+                if (kind_now[row + nx] or terrain_miss(nx, ny, row + nx)) == K_SEA then
+                    local distance_squared = dx * dx + dy * dy
+                    toward_sea_x = toward_sea_x + dx / distance_squared
+                    toward_sea_y = toward_sea_y + dy / distance_squared
+                end
             end
         end
     end
-
     local best, best_score = 5, -math.huge
-    for index, dir in ipairs(FLOW_DIRECTIONS) do
-        local away_from_sea = -(dir.dx * toward_sea_x + dir.dy * toward_sea_y)
-        local score = away_from_sea / math.sqrt(dir.dx * dir.dx + dir.dy * dir.dy)
+    for index = 1, 8 do
+        local dx, dy = FLOW_DX[index], FLOW_DY[index]
+        local away_from_sea = -(dx * toward_sea_x + dy * toward_sea_y)
+        local score = away_from_sea / math.sqrt(dx * dx + dy * dy)
         if score > best_score then best, best_score = index, score end
     end
+    shore_flow[full] = best
+    return best
+end
 
-    local facing = {
-        flow = best,
-        crests = math.abs(toward_sea_y) >= math.abs(toward_sea_x) and 'up' or 'side',
-    }
-    shore_cache[key] = facing
-    return facing
+-- Layers a piece can go on (see the pieces below)
+local FLOOR, TOP, UNDER, NO_EDGE = 1, 2, 3, 4
+
+-- Like vanilla river tiles, each wash tile runs a frame behind the one upstream of it, so the pattern
+-- travels away from the sea.
+-- Driftwood, shrubs and saplings: the game draws them on the second floor layer, where the wash would
+-- go, and on top of the map the wash came out see-through, so the sand under the log looked dry. There
+-- the wash takes the place of the sand, on the first floor layer, under the log or plant.
+-- Every side is drawn as open water: the foam edge is not drawn inside the wash tile (the mod's way,
+-- against sand) but as the rim on the dry tile beside it, the same rim as along the sea.
+local function wash_miss(x, y, key)
+    if (kind_now[key] or terrain_miss(x, y, key)) == K_BOULDER then
+        -- a boulder keeps its own tile; the water goes under it
+        wash_first[key] = 0
+        return 0
+    end
+    local touches_sea = false
+    for side = 1, 4 do
+        local near = key + DKEY[side]
+        if (kind_now[near] or terrain_miss(x + DX[side], y + DY[side], near)) == K_SEA then touches_sea = true end
+    end
+    local full = key + level_key
+    local facing = shore_flow[full] or shore_miss(x, y, full)
+    local tiletype = getTileType(x, y, level)
+    local first = wash_row(touches_sea, ALL_SIDES_WET, facing)
+    wash_first[key] = first
+    wash_shift[key] = -(x * FLOW_DX[facing] + y * FLOW_DY[facing])
+    wash_layer[key] = (tiletype and WASH_UNDER[tiletype]) and UNDER or FLOOR
+    return first
 end
 
 ----------------------------------------------------------------------------------------------
@@ -812,87 +758,94 @@ end
 -- Foam is born at density 47-95 and the game lowers it by 3 every hundred ticks or so. Its stage
 -- is how far it has fallen from the density it was first seen at, so weak foam starts fresh too.
 -- Foam that's gone is forgotten after a while.
-foam_born = foam_born or {}
-local function foam_stage(x, y, z, density)
-    local key = tile_key(x, y, z)
-    local born = foam_born[key]
-    if not born or density > born.density then
-        born = {density = density}
-        foam_born[key] = born
-    end
-    born.seen = df.global.cur_year_tick
-    local stage = math.floor(density / born.density * FOAM_STAGES)
-    return math.max(0, math.min(stage, FOAM_STAGES - 1))
-end
+foam_density = foam_density or {}
+foam_seen = foam_seen or {}
 
 local function forget_old_foam()
     local now = df.global.cur_year_tick
-    for key, born in pairs(foam_born) do
-        if now - born.seen > 1000 or now < born.seen then foam_born[key] = nil end
+    for key, seen in pairs(foam_seen) do
+        if now - seen > 1000 or now < seen then foam_seen[key], foam_density[key] = nil, nil end
     end
 end
 
--- Wave and foam flows on level z inside the rectangle. Reads only the map blocks in view. Each
--- field read from a flow is a call into the game, so each is read once.
-local function find_waves(x1, y1, x2, y2, z)
-    local waves, foam, spray = {}, {}, {}
+-- The flows found by the last scan: waves (in seen_waves, shared with the caustics), foam and spray.
+local wave_x, wave_y, wave_key, wave_density = seen_waves.x, seen_waves.y, seen_waves.key, seen_waves.density
+local wave_count = 0
+local foam_x, foam_y, foam_stage, foam_count = {}, {}, {}, 0
+local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
+-- one number per flow found (what it is, where, its stage), to tell whether anything has changed
+local found, found_count = {}, 0
+
+-- Reads the wave, foam and spray flows on level z in the map blocks that the rectangle touches. Each
+-- field read from a flow is a call into the game, so each is read once. Returns whether the flows are
+-- the same as at the last scan.
+local function find_flows(x1, y1, x2, y2, z, tick)
     local OceanWave, SeaFoam, Steam = df.flow_type.OceanWave, df.flow_type.SeaFoam, df.flow_type.Steam
+    local zkey = z * 16777216
+    local waves, foams, sprays, n, same = 0, 0, 0, 0, true
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
-            local block = dfhack.maps.getTileBlock(block_x, block_y, z)
-            for _, flow in ipairs(block and block.flows or {}) do
-                local density = flow.density
-                local flow_type = density > 0 and flow.type
-                if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
-                    local pos = flow.pos
-                    local x, y = pos.x, pos.y
-                    if pos.z == z then
-                        if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
-                            waves[#waves + 1] = {x = x, y = y}
-                        elseif flow_type == OceanWave then
-                            -- the wave's last thin water, broken up into foam
-                            foam[#foam + 1] = {x = x, y = y, stage = density * FOAM_STAGES // WAVE_FOAM_BELOW}
-                        elseif flow_type == SeaFoam then
-                            foam[#foam + 1] = {x = x, y = y, stage = foam_stage(x, y, z, density)}
-                        else
-                            local stage = math.min(density * FOAM_STAGES // SPRAY_FULL, FOAM_STAGES - 1)
-                            spray[#spray + 1] = {x = x, y = y, stage = stage}
+            local block = getTileBlock(block_x, block_y, z)
+            local flows = block and block.flows
+            if flows then
+                -- (indexed: ipairs over one of the game's lists takes four times as long per item)
+                for i = 0, #flows - 1 do
+                    local flow = flows[i]
+                    local density = flow.density
+                    local flow_type = density > 0 and flow.type
+                    if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
+                        local pos = flow.pos
+                        if pos.z == z then
+                            local x, y = pos.x, pos.y
+                            local key = x + y * 4096
+                            local code
+                            if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
+                                waves = waves + 1
+                                wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
+                                code = key
+                            elseif flow_type == Steam then
+                                local stage = density * FOAM_STAGES // SPRAY_FULL
+                                if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                                sprays = sprays + 1
+                                spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
+                                code = key + 33554432 + stage * 67108864
+                            else
+                                local stage
+                                if flow_type == OceanWave then
+                                    -- the wave's last thin water, broken up into foam
+                                    stage = density * FOAM_STAGES // WAVE_FOAM_BELOW
+                                else
+                                    local full = key + zkey
+                                    local born = foam_density[full]
+                                    if not born or density > born then
+                                        born = density
+                                        foam_density[full] = born
+                                    end
+                                    foam_seen[full] = tick
+                                    stage = math.floor(density / born * FOAM_STAGES)
+                                    if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                                    if stage < 0 then stage = 0 end
+                                end
+                                foams = foams + 1
+                                foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
+                                code = key + 16777216 + stage * 67108864
+                            end
+                            n = n + 1
+                            if found[n] ~= code then
+                                found[n] = code
+                                same = false
+                            end
                         end
                     end
                 end
             end
         end
     end
-    return waves, foam, spray
-end
-
-local function sign(n)
-    return n > 0 and 1 or n < 0 and -1 or 0
-end
-
--- The incoming crests on level z inside the rectangle: where each is, which way it's heading
--- (diagonals go by their north/south part), and how white it is, from how close it is to
--- breaking on the beach.
-local function find_crests(x1, y1, x2, y2, z)
-    local crests = {}
-    for _, wave in ipairs(df.global.world.event.ocean_waves) do
-        if wave.z == z then
-            local cur, dest = wave.cur, wave.dest
-            local x, y = cur.x, cur.y
-            if x >= x1 and x <= x2 and y >= y1 and y <= y2 then
-                local dest_x, dest_y = dest.x, dest.y
-                local dx, dy = sign(dest_x - x), sign(dest_y - y)
-                local heading = dy < 0 and 'north' or dy > 0 and 'south' or dx > 0 and 'east' or 'west'
-                local tiles_to_go = math.max(math.abs(dest_x - x), math.abs(dest_y - y))
-                crests[#crests + 1] = {
-                    x = x, y = y,
-                    heading = heading,
-                    whiteness = tiles_to_go <= 1 and 3 or tiles_to_go <= 2 and 2 or tiles_to_go <= 4 and 1 or 0,
-                }
-            end
-        end
-    end
-    return crests
+    if n ~= found_count then same = false end
+    wave_count, foam_count, spray_count, found_count = waves, foams, sprays, n
+    seen_waves.n, seen_waves.z = waves, z
+    seen_waves.x1, seen_waves.y1, seen_waves.x2, seen_waves.y2 = x1, y1, x2, y2
+    return same
 end
 
 ----------------------------------------------------------------------------------------------
@@ -901,261 +854,242 @@ end
 
 -- A piece is one tile of art at one map tile, ready to animate:
 --   x, y         the map tile
---   sheet        the sheet's key in `sheets`
---   first_tile   the tile number of frame 0 of its row
---   frame_shift  added to the animation step, so neighbours aren't in step
---   layer        'floor'     the map's second floor layer, under dwarves and items, or on top
---                            if that's taken
---                'top'       on top of the map
---                'under'     the map's first floor layer (under a boulder)
---   clears_floor_flag  also blank the map's floor_flag layer here (the sand edge on the sea)
-local function piece(x, y, sheet, first_tile, frame_shift, layer)
-    return {x = x, y = y, sheet = sheet, first_tile = first_tile, frame_shift = frame_shift, layer = layer}
-end
+--   sheet        the sheet's name
+--   first        the tile number of frame 0 of its row
+--   shift        added to the animation step, so neighbours aren't in step
+--   layer        FLOOR     the map's second floor layer, under dwarves and items, or on top
+--                          if that's taken
+--                TOP       on top of the map
+--                UNDER     the map's first floor layer (under a boulder, log or plant)
+--                NO_EDGE   no art: only blanks the map's floor_flag layer here
+--   clears       also blank the map's floor_flag layer here (the sand edge on the sea)
+local piece_x, piece_y, piece_sheet, piece_first, piece_shift, piece_layer, piece_clears = {}, {}, {}, {}, {}, {}, {}
+local piece_count = 0
 
--- Land beside the open sea (rock, sand, soil, grass): the same rim as rock beside the wash. The sea tiles come from the caustics'
--- own scan of the view (water_map), so this is worked out again only when that list or the terrain
--- changes. Returns a list of {x, y, mask}: the sides and corners of the rock tile that face the sea.
-sea_rocks = sea_rocks or {}
--- Land that gets the rim: rock, sand, soil and grass floors, pebbles and boulders.
-local SHORE_KINDS = {rock = true, dry_beach = true, boulder = true}
+-- Land beside the open sea (rock, sand, soil, grass, boulders; natural ground only, not built floors
+-- beside a salt-water moat): the same rim as rock beside the wash. The sea tiles come from the caustics'
+-- own scan of the view, so this is worked out again only when the view or the terrain round changes.
+-- sea_rocks: n, x, y, mask (the sides and corners of the land tile that face the sea), and sea_n, sea_x,
+-- sea_y: the sea tiles beside that land. The game draws the frayed edge of sand on those; with the rim
+-- that edge would hang in the water, so it is switched off there.
+sea_rocks = sea_rocks or {n = 0, sea_n = 0}
 local function rocks_by_the_sea(z)
     local water = state.cache
-    if not water or state.z ~= z then return {} end
+    if not water or state.z ~= z then return nil end
     -- for a still view once per terrain round (a second), not at every water rescan
-    if sea_rocks.view == state.key and sea_rocks.round == terrain_round then return sea_rocks.list, sea_rocks.sea end
-    local list, seen, sea, land = {}, {}, {}, {}
-    for i = 1, #water do
-        local tile = water[i]
+    if sea_rocks.view == state.view_id and sea_rocks.round == terrain_round then return sea_rocks end
+    local rocks = {view = state.view_id, round = terrain_round, n = 0, x = {}, y = {}, mask = {}, sea_n = 0, sea_x = {}, sea_y = {}}
+    local seen, land = {}, {}
+    local sea = water.groups.sea
+    for i = 1, sea and sea.n or 0 do
+        local x, y = sea.x[i], sea.y[i]
+        local key = x + y * 4096
         -- (the caustics also light water seen through open space further down; that is not a shore)
-        if tile[3] == 'sea' and terrain_at(tile[1], tile[2], z) == 'sea' then
+        if (kind_now[key] or terrain_miss(x, y, key)) == K_SEA then
             local touches_land = false
-            for _, dir in ipairs(SIDES_AND_CORNERS) do
-                local rx, ry = tile[1] - dir.dx, tile[2] - dir.dy
-                local key = tile_key(rx, ry, 0)
-                if land[key] then touches_land = true end
-                if not seen[key] and SHORE_KINDS[terrain_at(rx, ry, z)] then
-                    seen[key] = true
-                    -- natural ground only: not built floors beside a salt-water moat
-                    local tiletype = dfhack.maps.getTileType(rx, ry, z)
-                    if tiletype and df.tiletype.attrs[tiletype].material ~= df.tiletype_material.CONSTRUCTION then
-                        -- The mask comes from the terrain, not from the water list: that list stops at
-                        -- the view's edge and leaves out tiles with a creature in them.
-                        local mask = 0
-                        for _, side in ipairs(SIDES_AND_CORNERS) do
-                            if terrain_at(rx + side.dx, ry + side.dy, z) == 'sea' then mask = mask + side.bit end
+            for d = 1, 8 do
+                local rock_key = key - DKEY[d]
+                if land[rock_key] then touches_land = true end
+                if not seen[rock_key] then
+                    local rx, ry = x - DX[d], y - DY[d]
+                    local kind = kind_now[rock_key] or terrain_miss(rx, ry, rock_key)
+                    if kind == K_ROCK or kind == K_BEACH or kind == K_BOULDER then
+                        seen[rock_key] = true
+                        local tiletype = getTileType(rx, ry, z)
+                        if tiletype and not BUILT[tiletype] then
+                            -- The mask comes from the terrain, not from the water list: that list stops at
+                            -- the view's edge and leaves out tiles with a creature in them.
+                            local mask = 0
+                            for side = 1, 8 do
+                                local near = rock_key + DKEY[side]
+                                if (kind_now[near] or terrain_miss(rx + DX[side], ry + DY[side], near)) == K_SEA then
+                                    mask = mask + BIT[side]
+                                end
+                            end
+                            local n = rocks.n + 1
+                            rocks.n, rocks.x[n], rocks.y[n], rocks.mask[n] = n, rx, ry, mask
+                            land[rock_key] = true
+                            touches_land = true
                         end
-                        list[#list + 1] = {x = rx, y = ry, mask = mask}
-                        land[key] = true
-                        touches_land = true
                     end
                 end
             end
-            -- the game draws the frayed edge of sand on the sea tile beside it; with the rim that
-            -- edge would hang in the water, so it is switched off there
-            if touches_land then sea[#sea + 1] = {x = tile[1], y = tile[2]} end
+            if touches_land then
+                local n = rocks.sea_n + 1
+                rocks.sea_n, rocks.sea_x[n], rocks.sea_y[n] = n, x, y
+            end
         end
     end
-    sea_rocks = {view = state.key, round = terrain_round, list = list, sea = sea}
-    return list, sea
+    sea_rocks = rocks
+    return rocks
 end
 
--- Plans the river style, in drawing order:
---   wash         on each wave: wet_sides (sides where the water carries on: another wave, rock
---                or the sea; the other sides get foam) and touches_sea
+-- Plans the pieces from the flows found, in drawing order:
+--   wash         on each wave
 --   foam         on each foam patch, joined to neighbouring foam and waves
---   fringes      rock and sea tiles beside the wash, with the sides and corners that face it
+--   fringes      land and sea tiles beside the wash, with the sides and corners that face it
 --   boulders     boulders in or beside the wash
 --   whitecaps    the spray that's over a wave or the sea, last so it covers the rest
-local ALL_SIDES_WET = 0
-for _, side in ipairs(SIDES) do ALL_SIDES_WET = ALL_SIDES_WET | side.bit end
-
-local function plan_river(waves, foam, spray, z)
-    local pieces = {}
+local function plan(z)
+    local n = 0
+    local function piece(x, y, sheet, first, shift, layer, clears)
+        n = n + 1
+        piece_x[n], piece_y[n], piece_sheet[n], piece_first[n], piece_shift[n], piece_layer[n], piece_clears[n] =
+            x, y, sheet, first, shift, layer, clears
+    end
 
     local wave_at = {}
-    for _, wave in ipairs(waves) do wave_at[tile_key(wave.x, wave.y, 0)] = true end
-    local function has_wave(x, y) return wave_at[tile_key(x, y, 0)] end
+    for i = 1, wave_count do wave_at[wave_key[i]] = true end
 
-    -- The wash. A boulder keeps its own tile; the water goes under it below.
-    for _, wave in ipairs(waves) do
-        local x, y = wave.x, wave.y
-        if terrain_at(x, y, z) ~= 'boulder' then
-            local wet_sides, touches_sea = 0, false
-            for _, side in ipairs(SIDES) do
-                local nx, ny = x + side.dx, y + side.dy
-                local kind = terrain_at(nx, ny, z)
-                -- Every side is drawn as open water: the foam edge is not drawn inside the wash tile
-                -- (the mod's way, against sand) but as the rim on the dry tile beside it, the same
-                -- rim as along the sea, so the foam line runs on unbroken.
-                wet_sides = add_bit(wet_sides, side.bit)
-                if kind == 'sea' then touches_sea = true end
-            end
-            local facing = shore_facing(x, y, z).flow
-            local dir = FLOW_DIRECTIONS[facing]
-            -- Like vanilla river tiles, each tile runs a frame behind the one upstream of it, so
-            -- the caustics travel away from the sea.
-            -- Driftwood: the game draws the log on the second floor layer, where the wash would go, and
-            -- on top of the map the wash came out see-through, so the sand under the log looked dry.
-            -- There the wash takes the place of the sand, on the first floor layer, under the log.
-            pieces[#pieces + 1] = piece(x, y, 'wash', wash_row(touches_sea, wet_sides, facing),
-                -(x * dir.dx + y * dir.dy), (is_driftwood(x, y, z) or is_plant(x, y, z)) and 'under' or 'floor')
+    for i = 1, wave_count do
+        local key = wave_key[i]
+        local first = wash_first[key] or wash_miss(wave_x[i], wave_y[i], key)
+        if first ~= 0 then
+            n = n + 1
+            piece_x[n], piece_y[n], piece_sheet[n], piece_first[n], piece_shift[n], piece_layer[n], piece_clears[n] =
+                wave_x[i], wave_y[i], 'wash', first, wash_shift[key], wash_layer[key], false
         end
     end
 
     -- A foam patch runs into neighbouring foam and waves; towards bare ground it frays out.
     -- Foam is what the water leaves behind: none on a tile a wave is covering, none on the sea.
-    local left_behind = {}
-    for _, patch in ipairs(foam) do
-        if not has_wave(patch.x, patch.y) and terrain_at(patch.x, patch.y, z) ~= 'sea' then
-            left_behind[#left_behind + 1] = patch
+    local left_x, left_y, left_stage, left_key, left, foam_at = {}, {}, {}, {}, 0, {}
+    for i = 1, foam_count do
+        local x, y = foam_x[i], foam_y[i]
+        local key = x + y * 4096
+        if not wave_at[key] and (kind_now[key] or terrain_miss(x, y, key)) ~= K_SEA then
+            left = left + 1
+            left_x[left], left_y[left], left_stage[left], left_key[left] = x, y, foam_stage[i], key
+            foam_at[key] = true
         end
     end
-    foam = left_behind
-    local foam_at = {}
-    for _, patch in ipairs(foam) do foam_at[tile_key(patch.x, patch.y, 0)] = true end
-    for _, patch in ipairs(foam) do
-        local x, y = patch.x, patch.y
+    for i = 1, left do
+        local x, y, key = left_x[i], left_y[i], left_key[i]
         local joined_sides = 0
-        for _, side in ipairs(SIDES) do
-            local nx, ny = x + side.dx, y + side.dy
-            if has_wave(nx, ny) or foam_at[tile_key(nx, ny, 0)] then
-                joined_sides = add_bit(joined_sides, side.bit)
-            end
+        for side = 1, 4 do
+            local near = key + DKEY[side]
+            if wave_at[near] or foam_at[near] then joined_sides = joined_sides + BIT[side] end
         end
         -- out of step with its neighbours, so the static doesn't pulse across a patch
-        pieces[#pieces + 1] = piece(x, y, 'sea_foam', foam_row(patch.stage, joined_sides, x, y),
-            x * 3 + y * 5, 'floor')
+        piece(x, y, 'sea_foam', foam_row(left_stage[i], joined_sides, x, y), x * 3 + y * 5, FLOOR, false)
     end
 
-    -- Rock and sea around the waves, and boulders on or beside them.
-    local fringe_list, fringe_at = {}, {}
-    local boulder_list, boulder_at = {}, {}
-    for _, wave in ipairs(waves) do
-        local x, y = wave.x, wave.y
-
-        for _, offset in ipairs(HERE_AND_SIDES) do
-            local bx, by = x + offset.dx, y + offset.dy
-            local key = tile_key(bx, by, 0)
-            if not boulder_at[key] and terrain_at(bx, by, z) == 'boulder' then
-                boulder_at[key] = true
-                boulder_list[#boulder_list + 1] = {x = bx, y = by}
+    -- Land and sea around the waves, and boulders on or beside them.
+    local fringe_x, fringe_y, fringe_mask, fringe_is_sea, fringes, fringe_at = {}, {}, {}, {}, 0, {}
+    local boulder_x, boulder_y, boulder_key, boulders, boulder_at = {}, {}, {}, 0, {}
+    local function fringe(x, y, key, is_sea, mask)
+        local f = fringe_at[key]
+        if not f then
+            fringes = fringes + 1
+            f = fringes
+            fringe_at[key] = f
+            fringe_x[f], fringe_y[f], fringe_mask[f], fringe_is_sea[f] = x, y, 0, is_sea
+        end
+        -- (a mask of bits, so OR-ing in sides already set is harmless)
+        fringe_mask[f] = fringe_mask[f] | mask
+    end
+    for i = 1, wave_count do
+        local x, y, key = wave_x[i], wave_y[i], wave_key[i]
+        if not boulder_at[key] and (kind_now[key] or terrain_miss(x, y, key)) == K_BOULDER then
+            boulder_at[key] = true
+            boulders = boulders + 1
+            boulder_x[boulders], boulder_y[boulders], boulder_key[boulders] = x, y, key
+        end
+        for side = 1, 4 do
+            local near = key + DKEY[side]
+            if not boulder_at[near] then
+                local bx, by = x + DX[side], y + DY[side]
+                if (kind_now[near] or terrain_miss(bx, by, near)) == K_BOULDER then
+                    boulder_at[near] = true
+                    boulders = boulders + 1
+                    boulder_x[boulders], boulder_y[boulders], boulder_key[boulders] = bx, by, near
+                end
             end
         end
-
-        -- Seen from the fringe tile, the wave lies in direction `dir`.
-        for _, dir in ipairs(SIDES_AND_CORNERS) do
-            local fx, fy = x - dir.dx, y - dir.dy
-            if not has_wave(fx, fy) then
-                local kind = terrain_at(fx, fy, z)
-                if kind == 'rock' or kind == 'dry_beach' or kind == 'sea' then
-                    local key = tile_key(fx, fy, 0)
-                    local fringe = fringe_at[key]
-                    if not fringe then
-                        fringe = {x = fx, y = fy, sides_facing_water = 0, is_sea = kind == 'sea'}
-                        fringe_at[key] = fringe
-                        fringe_list[#fringe_list + 1] = fringe
-                    end
-                    fringe.sides_facing_water = add_bit(fringe.sides_facing_water, dir.bit)
+        -- Seen from the fringe tile, the wave lies in direction d.
+        for d = 1, 8 do
+            local near = key - DKEY[d]
+            if not wave_at[near] then
+                local fx, fy = x - DX[d], y - DY[d]
+                local kind = kind_now[near] or terrain_miss(fx, fy, near)
+                if kind == K_ROCK or kind == K_BEACH or kind == K_SEA then
+                    fringe(fx, fy, near, kind == K_SEA, BIT[d])
                 end
             end
         end
     end
     -- A boulder on or beside a wave gets water under it (below), so to the land next to it that
     -- boulder is water too: the rim also runs along the side facing the boulder.
-    for _, boulder in ipairs(boulder_list) do
-        for _, dir in ipairs(SIDES_AND_CORNERS) do
-            local fx, fy = boulder.x - dir.dx, boulder.y - dir.dy
-            if not has_wave(fx, fy) then
-                local kind = terrain_at(fx, fy, z)
-                if kind == 'rock' or kind == 'dry_beach' then
-                    local key = tile_key(fx, fy, 0)
-                    local fringe = fringe_at[key]
-                    if not fringe then
-                        fringe = {x = fx, y = fy, sides_facing_water = 0, is_sea = false}
-                        fringe_at[key] = fringe
-                        fringe_list[#fringe_list + 1] = fringe
-                    end
-                    fringe.sides_facing_water = add_bit(fringe.sides_facing_water, dir.bit)
-                end
+    for i = 1, boulders do
+        local x, y, key = boulder_x[i], boulder_y[i], boulder_key[i]
+        for d = 1, 8 do
+            local near = key - DKEY[d]
+            if not wave_at[near] then
+                local fx, fy = x - DX[d], y - DY[d]
+                local kind = kind_now[near] or terrain_miss(fx, fy, near)
+                if kind == K_ROCK or kind == K_BEACH then fringe(fx, fy, near, false, BIT[d]) end
             end
         end
     end
-    local shore, shore_sea = rocks_by_the_sea(z)
-    for _, tile in ipairs(shore_sea or {}) do
-        if not fringe_at[tile_key(tile.x, tile.y, 0)] then
-            pieces[#pieces + 1] = piece(tile.x, tile.y, 'sea_foam', 1, 0, 'no_edge')
+    local shore = rocks_by_the_sea(z)
+    if shore then
+        for i = 1, shore.sea_n do
+            local x, y = shore.sea_x[i], shore.sea_y[i]
+            if not fringe_at[x + y * 4096] then piece(x, y, 'sea_foam', 1, 0, NO_EDGE, false) end
+        end
+        for i = 1, shore.n do
+            local x, y = shore.x[i], shore.y[i]
+            local key = x + y * 4096
+            if not wave_at[key] then fringe(x, y, key, false, shore.mask[i]) end
         end
     end
-    for _, rock in ipairs(shore) do
-        if not has_wave(rock.x, rock.y) then
-            local key = tile_key(rock.x, rock.y, 0)
-            local fringe = fringe_at[key]
-            if not fringe then
-                fringe = {x = rock.x, y = rock.y, sides_facing_water = 0, is_sea = false}
-                fringe_at[key] = fringe
-                fringe_list[#fringe_list + 1] = fringe
-            end
-            -- (a mask of bits, so OR-ing in sides a wave already set is harmless)
-            fringe.sides_facing_water = fringe.sides_facing_water | rock.mask
-        end
-    end
-    for _, fringe in ipairs(fringe_list) do
-        local fringe_piece = piece(fringe.x, fringe.y, fringe.is_sea and 'sea_fringe' or 'rock_fringe',
-            fringe_row(fringe.sides_facing_water), 0, fringe.is_sea and 'floor' or 'top')
+    for f = 1, fringes do
         -- floor_flag draws the sand's edge on the sea; the sea fringe replaces it
-        fringe_piece.clears_floor_flag = fringe.is_sea
-        pieces[#pieces + 1] = fringe_piece
+        local is_sea = fringe_is_sea[f]
+        piece(fringe_x[f], fringe_y[f], is_sea and 'sea_fringe' or 'rock_fringe', fringe_mask[f] * FRAMES + 1, 0,
+            is_sea and FLOOR or TOP, is_sea)
     end
-    for _, boulder in ipairs(boulder_list) do
+    for i = 1, boulders do
         -- The boulder is drawn on the second floor layer, over this one. Under it goes the same
         -- wash as on the tiles around it (same colour, same moving pattern), not a flat square.
-        local x, y = boulder.x, boulder.y
+        local x, y, key = boulder_x[i], boulder_y[i], boulder_key[i]
         local touches_sea = false
-        for _, side in ipairs(SIDES) do
-            if terrain_at(x + side.dx, y + side.dy, z) == 'sea' then touches_sea = true end
+        for side = 1, 4 do
+            local near = key + DKEY[side]
+            if (kind_now[near] or terrain_miss(x + DX[side], y + DY[side], near)) == K_SEA then touches_sea = true end
         end
-        local facing = shore_facing(x, y, z).flow
-        local dir = FLOW_DIRECTIONS[facing]
-        pieces[#pieces + 1] = piece(x, y, 'wash', wash_row(touches_sea, ALL_SIDES_WET, facing),
-            -(x * dir.dx + y * dir.dy), 'under')
+        local full = key + level_key
+        local facing = shore_flow[full] or shore_miss(x, y, full)
+        piece(x, y, 'wash', wash_row(touches_sea, ALL_SIDES_WET, facing),
+            -(x * FLOW_DX[facing] + y * FLOW_DY[facing]), UNDER, false)
     end
 
     -- Spray shows as whitecaps only on the water: over a wave or the sea. Whitecaps join up
     -- with each other.
-    local whitecaps, whitecap_at = {}, {}
-    for _, patch in ipairs(spray) do
-        if has_wave(patch.x, patch.y) or terrain_at(patch.x, patch.y, z) == 'sea' then
-            whitecaps[#whitecaps + 1] = patch
-            whitecap_at[tile_key(patch.x, patch.y, 0)] = true
+    local cap_x, cap_y, cap_stage, cap_key, caps, cap_at = {}, {}, {}, {}, 0, {}
+    for i = 1, spray_count do
+        local x, y = spray_x[i], spray_y[i]
+        local key = x + y * 4096
+        if wave_at[key] or (kind_now[key] or terrain_miss(x, y, key)) == K_SEA then
+            caps = caps + 1
+            cap_x[caps], cap_y[caps], cap_stage[caps], cap_key[caps] = x, y, spray_stage[i], key
+            cap_at[key] = true
         end
     end
-    for _, patch in ipairs(whitecaps) do
-        local x, y = patch.x, patch.y
+    for i = 1, caps do
+        local x, y, key = cap_x[i], cap_y[i], cap_key[i]
         local joined_sides = 0
-        for _, side in ipairs(SIDES) do
-            if whitecap_at[tile_key(x + side.dx, y + side.dy, 0)] then
-                joined_sides = add_bit(joined_sides, side.bit)
-            end
+        for side = 1, 4 do
+            if cap_at[key + DKEY[side]] then joined_sides = joined_sides + BIT[side] end
         end
         -- never the solid patches of fresh beach foam: on the water those read as foam left on sand
-        pieces[#pieces + 1] = piece(x, y, 'sea_foam',
-            foam_row(math.min(patch.stage, WHITECAP_MAX_STAGE), joined_sides, x, y), x * 3 + y * 5, 'top')
+        local stage = cap_stage[i]
+        if stage > WHITECAP_MAX_STAGE then stage = WHITECAP_MAX_STAGE end
+        piece(x, y, 'sea_foam', foam_row(stage, joined_sides, x, y), x * 3 + y * 5, TOP, false)
     end
 
-    return pieces
-end
-
--- Plans the older crest styles: a crest sheet on each wave tile.
-local function plan_crests(waves, z)
-    local pieces = {}
-    for _, wave in ipairs(waves) do
-        local which = style == 'auto' and shore_facing(wave.x, wave.y, z).crests or style
-        -- offset by position so neighbouring tiles aren't in step
-        pieces[#pieces + 1] = piece(wave.x, wave.y, which == 'up' and 'up_crests' or 'side_crests',
-            1, wave.x + wave.y, 'top')
-    end
-    return pieces
+    piece_count = n
+    plan_number = plan_number + 1
 end
 
 ----------------------------------------------------------------------------------------------
@@ -1178,6 +1112,7 @@ local function timed_since(part, started_ms)
     entry.runs = entry.runs + 1
 end
 
+
 ----------------------------------------------------------------------------------------------
 -- The overlay
 ----------------------------------------------------------------------------------------------
@@ -1189,165 +1124,244 @@ local TILE_PEN = dfhack.pen.parse{ch = ' ', fg = COLOR_GREY}
 WavesOverlay = defclass(WavesOverlay)
 
 function WavesOverlay:init()
-    self.pieces = {}
     self.next_scan = 0
     self.next_foam_cleanup = 0
     self.next_terrain_round = 0
-    self.draw_list, self.draw_list_key = {}, nil
-    self.crest_list, self.crest_list_key = {}, nil
+    self.replan = true
+    -- the draw list: for each piece in view its layer, screen position, index into the map's screen
+    -- layers (-1 if outside them), texture, and whether it clears the floor_flag layer
+    self.draw_layer, self.draw_sx, self.draw_sy, self.draw_index, self.draw_texpos, self.draw_clears = {}, {}, {}, {}, {}, {}
+    self.draw_count = 0
+    self.crest_sx, self.crest_sy, self.crest_texpos, self.crest_count = {}, {}, {}, 0
 end
 
-function WavesOverlay:rescan(viewport)
+function WavesOverlay:rescan(viewport, now, tick)
     local started = dfhack.getTickCount()
-    scan_number = scan_number + 1
-    forget_texposes()
     local z = viewport.z
-    local waves, foam, spray = find_waves(viewport.x1, viewport.y1, viewport.x2, viewport.y2, z)
-    local now = dfhack.getTickCount()
-    timed_since('  finding flows', started)
     if now >= self.next_terrain_round then
         terrain_round = terrain_round + 1
         self.next_terrain_round = now + TERRAIN_RECHECK_MS
+        kind_now, wash_first, wash_shift, wash_layer = {}, {}, {}, {}
+        forget_texposes()
     end
+    if z ~= level then
+        level, level_key = z, z * 16777216
+        kind_now, wash_first, wash_shift, wash_layer = {}, {}, {}, {}
+    end
+    local same_flows = find_flows(viewport.x1, viewport.y1, viewport.x2, viewport.y2, z, tick)
+    timed_since('  finding flows', started)
     if now >= self.next_foam_cleanup then
         forget_old_foam()
         self.next_foam_cleanup = now + FORGET_FOAM_MS
     end
-    local planning = dfhack.getTickCount()
-    if style == 'river' then
-        self.pieces = plan_river(waves, foam, spray, z)
-    else
-        self.pieces = plan_crests(waves, z)
+    self.scan_tick, self.scan_water = tick, state.view_id
+    self.scan_x1, self.scan_y1, self.scan_x2, self.scan_y2, self.scan_z = viewport.x1, viewport.y1, viewport.x2, viewport.y2, z
+    -- The plan follows from the flows, the terrain (fixed for a round) and the caustics' water list (the
+    -- rim along the sea, worked out once per view and round): if none of those has changed, it stands.
+    local has_water = state.cache ~= nil and state.z == z
+    if same_flows and not self.replan and self.plan_round == terrain_round and self.plan_z == z
+            and self.plan_water == state.view_id and self.plan_has_water == has_water then
+        timed_since('scan and plan', started)
+        return
     end
-    self.draw_list_key = nil
+    local planning = dfhack.getTickCount()
+    plan(z)
+    self.plan_round, self.plan_z, self.plan_water, self.plan_has_water = terrain_round, z, state.view_id, has_water
+    -- If the shoreline moved while planning, some of this plan was made with the old shore directions:
+    -- plan again at the next scan.
+    self.replan = shores_moved
+    if shores_moved then
+        shores_moved = false
+        wash_first, wash_shift, wash_layer = {}, {}, {}
+    end
     timed_since('  planning', planning)
     timed_since('scan and plan', started)
 end
 
--- Turns the pieces into what to write for this step and view: for each piece in view, its
--- screen position, its index into the map's screen layers, and its texture.
+-- Turns the pieces into what to write for this step and view.
 function WavesOverlay:buildDrawList(viewport, port, step)
-    local list = {}
     local x1, y1, x2, y2 = viewport.x1, viewport.y1, viewport.x2, viewport.y2
     local dim_y, layer_size = port.dim_y, port.dim_x * port.dim_y
-    for _, p in ipairs(self.pieces) do
-        local x, y = p.x, p.y
+    local d_layer, d_sx, d_sy, d_index, d_texpos, d_clears =
+        self.draw_layer, self.draw_sx, self.draw_sy, self.draw_index, self.draw_texpos, self.draw_clears
+    local n = 0
+    for i = 1, piece_count do
+        local x, y = piece_x[i], piece_y[i]
         if x >= x1 and x <= x2 and y >= y1 and y <= y2 then
             local sx, sy = x - x1, y - y1
             local index = sx * dim_y + sy
-            if index < 0 or index >= layer_size then index = nil end
-            local frame = (step + p.frame_shift) % FRAMES
-            list[#list + 1] = {
-                sx = sx, sy = sy, index = index, layer = p.layer,
-                clears_floor_flag = p.clears_floor_flag,
-                texpos = texture(sheets[p.sheet], p.first_tile + frame),
-            }
+            if index < 0 or index >= layer_size then index = -1 end
+            local layer = piece_layer[i]
+            if layer == NO_EDGE then
+                if index >= 0 then
+                    n = n + 1
+                    d_layer[n], d_index[n] = NO_EDGE, index
+                end
+            elseif layer ~= UNDER or index >= 0 then
+                local sheet = piece_sheet[i]
+                local known = texpos_known[sheet]
+                local tile = piece_first[i] + (step + piece_shift[i]) % FRAMES
+                local texpos = known[tile]
+                if not texpos then
+                    texpos = getTexposByHandle(sheets[sheet][tile])
+                    known[tile] = texpos
+                end
+                n = n + 1
+                d_layer[n], d_sx[n], d_sy[n], d_index[n], d_texpos[n], d_clears[n] =
+                    layer, sx, sy, index, texpos, piece_clears[i]
+            end
         end
     end
-    return list
+    self.draw_count = n
 end
 
 -- Writes the draw list. The map's screen layers are rebuilt by the game every frame and drawn
 -- after overlays render, so anything written to them lasts exactly one frame and has to be
 -- written again each frame.
-local function draw(list, port, screen_x, screen_y)
+function WavesOverlay:draw(port, screen_x, screen_y)
     local floor_two = port.screentexpos_background_two
     local floor_one = port.screentexpos_background
     local floor_flag = port.screentexpos_floor_flag
     local paint = dfhack.screen.paintTile
-    for i = 1, #list do
-        local item = list[i]
-        local index, layer = item.index, item.layer
-        if layer == 'no_edge' then
-            if index then floor_flag[index] = 0 end
-        elseif layer == 'under' then
-            if index then floor_one[index] = item.texpos end
-        elseif layer == 'floor' and index and floor_two[index] == 0 then
+    local d_layer, d_sx, d_sy, d_index, d_texpos, d_clears =
+        self.draw_layer, self.draw_sx, self.draw_sy, self.draw_index, self.draw_texpos, self.draw_clears
+    for i = 1, self.draw_count do
+        local index, layer = d_index[i], d_layer[i]
+        if layer == NO_EDGE then
+            floor_flag[index] = 0
+        elseif layer == UNDER then
+            floor_one[index] = d_texpos[i]
+        elseif layer == FLOOR and index >= 0 and floor_two[index] == 0 then
             -- under dwarves, items and driftwood
-            floor_two[index] = item.texpos
-            if item.clears_floor_flag then floor_flag[index] = 0 end
+            floor_two[index] = d_texpos[i]
+            if d_clears[i] then floor_flag[index] = 0 end
         else
-            paint(TILE_PEN, screen_x + item.sx, screen_y + item.sy, ' ', item.texpos, true)
-            if item.clears_floor_flag and index then floor_flag[index] = 0 end
+            paint(TILE_PEN, screen_x + d_sx[i], screen_y + d_sy[i], ' ', d_texpos[i], true)
+            if index >= 0 and d_clears[i] then floor_flag[index] = 0 end
         end
     end
 end
 
+-- The incoming crests in view: where each is, which way it's heading (diagonals go by their
+-- north/south part), and how white it is, from how close it is to breaking on the beach.
 -- Crests move every few ticks, so their draw list is made again whenever the game ticks (or
 -- the view moves). Finding them means reading every incoming wave on the map, which on a big
 -- sea is a hundred or more, so it isn't done more often than that: when the game ticks slower
 -- than the screen redraws, or is paused, the last list is drawn again.
-local function crest_draw_list(viewport, step)
-    local list = {}
-    local x1, y1 = viewport.x1, viewport.y1
-    for _, crest in ipairs(find_crests(x1, y1, viewport.x2, viewport.y2, viewport.z)) do
-        local frame = (step + crest.x + crest.y) % FRAMES
-        list[#list + 1] = {
-            sx = crest.x - x1, sy = crest.y - y1,
-            texpos = texture(sheets.swell, swell_row(crest.heading, crest.whiteness) + frame),
-        }
+function WavesOverlay:findCrests(viewport, step)
+    local x1, y1, x2, y2, z = viewport.x1, viewport.y1, viewport.x2, viewport.y2, viewport.z
+    local c_sx, c_sy, c_texpos = self.crest_sx, self.crest_sy, self.crest_texpos
+    local swell, known = sheets.swell, texpos_known.swell
+    local n = 0
+    local waves = df.global.world.event.ocean_waves
+    for i = 0, #waves - 1 do
+        local wave = waves[i]
+        local cur = wave.cur
+        local x = cur.x
+        -- (most waves are out of view sideways, so that is tested first)
+        if x >= x1 and x <= x2 and wave.z == z then
+            local y = cur.y
+            if y >= y1 and y <= y2 then
+                local dest = wave.dest
+                local dx, dy = dest.x - x, dest.y - y
+                local heading = dy < 0 and HEADING_NORTH or dy > 0 and HEADING_SOUTH or dx > 0 and HEADING_EAST or HEADING_WEST
+                local tiles_to_go = math.max(math.abs(dx), math.abs(dy))
+                local whiteness = tiles_to_go <= 1 and 3 or tiles_to_go <= 2 and 2 or tiles_to_go <= 4 and 1 or 0
+                local tile = (heading * SWELL_WHITENESS + whiteness) * FRAMES + 1 + (step + x + y) % FRAMES
+                local texpos = known[tile]
+                if not texpos then
+                    texpos = getTexposByHandle(swell[tile])
+                    known[tile] = texpos
+                end
+                n = n + 1
+                c_sx[n], c_sy[n], c_texpos[n] = x - x1, y - y1, texpos
+            end
+        end
     end
-    return list
+    self.crest_count = n
 end
 
-local function draw_crests(list, screen_x, screen_y)
-    local paint = dfhack.screen.paintTile
-    for i = 1, #list do
-        local crest = list[i]
-        paint(TILE_PEN, screen_x + crest.sx, screen_y + crest.sy, ' ', crest.texpos, true)
-    end
-end
-
-function WavesOverlay:onRenderFrame(dc)
-    if not dfhack.screen.inGraphicsMode() or not dfhack.isMapLoaded() then return end
-    local started = dfhack.getTickCount()
-    local viewport = guidm.Viewport.get()
+function WavesOverlay:onRenderFrame(dc, viewport)
+    if not dfhack.screen.inGraphicsMode() then return end
+    local now = dfhack.getTickCount()
 
     -- (also reloads if this script gained a sheet since they were loaded)
     if not (sheets and sheets.swell) then
         sheets = load_sheets()
+        if sheets.missing then return end
+        forget_texposes()
+    elseif sheets.missing then
+        return
+    elseif textures_moved() then
         forget_texposes()
     end
 
-    local now = dfhack.getTickCount()
+    local x1, y1, z = viewport.x1, viewport.y1, viewport.z
+    local tick = df.global.cur_year_tick
+    local adventure = dfhack.world.isAdventureMode()
     if now >= self.next_scan then
-        self:rescan(viewport)
+        -- In fort mode the flows only change when the game ticks. While it stands still (paused), they
+        -- are read again only when the view or the caustics' water list has changed, and once per
+        -- terrain round.
+        if adventure or tick ~= self.scan_tick or self.replan or now >= self.next_terrain_round
+                or state.view_id ~= self.scan_water or z ~= self.scan_z or x1 ~= self.scan_x1 or y1 ~= self.scan_y1
+                or viewport.x2 ~= self.scan_x2 or viewport.y2 ~= self.scan_y2 then
+            self:rescan(viewport, now, tick)
+        end
         self.next_scan = now + RESCAN_MS
     end
-    local any_crests = style == 'river' and #df.global.world.event.ocean_waves > 0
-    if #self.pieces == 0 and not any_crests then return end
+    local any_crests = #df.global.world.event.ocean_waves > 0
+    if piece_count == 0 and not any_crests then return end
 
     -- animations run on game time, so they stop when the game is paused; but adventure mode's time
     -- only moves as the adventurer acts, so there they run on real time, at normal speed's pace
     -- (the waves themselves are the game's, and still move only as it runs)
-    local step = dfhack.world.isAdventureMode() and now // (TICKS_PER_FRAME * MS_PER_TICK)
-        or df.global.cur_year_tick // TICKS_PER_FRAME
+    local step = adventure and now // (TICKS_PER_FRAME * MS_PER_TICK) or tick // TICKS_PER_FRAME
     local port = df.global.gps.main_viewport
-    local key = ('%d,%d,%d,%d,%d,%d,%d'):format(step, viewport.x1, viewport.y1, viewport.z,
-        port.dim_x, port.dim_y, scan_number)
-    if key ~= self.draw_list_key then
-        self.draw_list = self:buildDrawList(viewport, port, step)
-        self.draw_list_key = key
+    local dim_x, dim_y = port.dim_x, port.dim_y
+    local view_moved = x1 ~= self.list_x1 or y1 ~= self.list_y1 or z ~= self.list_z
+        or viewport.x2 ~= self.list_x2 or viewport.y2 ~= self.list_y2
+        or dim_x ~= self.list_dim_x or dim_y ~= self.list_dim_y or texture_epoch ~= self.list_epoch
+    if view_moved or step ~= self.list_step or plan_number ~= self.list_plan then
+        self:buildDrawList(viewport, port, step)
+        self.list_step, self.list_plan = step, plan_number
+    end
+    if any_crests and (view_moved or tick ~= self.crest_tick) then
+        self:findCrests(viewport, step)
+        self.crest_tick = tick
+    end
+    if view_moved then
+        self.list_x1, self.list_y1, self.list_x2, self.list_y2, self.list_z = x1, y1, viewport.x2, viewport.y2, z
+        self.list_dim_x, self.list_dim_y, self.list_epoch = dim_x, dim_y, texture_epoch
     end
 
     -- the same screen origin the painter would use for map tiles
     local screen_x, screen_y = dc.x1, dc.y1
     if any_crests then
-        local tick = df.global.cur_year_tick
-        local crest_key = ('%d,%d,%d,%d,%d,%d,%d'):format(tick, viewport.x1, viewport.y1, viewport.x2,
-            viewport.y2, viewport.z, scan_number)
-        if crest_key ~= self.crest_list_key then
-            self.crest_list = crest_draw_list(viewport, step)
-            self.crest_list_key = crest_key
+        local paint = dfhack.screen.paintTile
+        local c_sx, c_sy, c_texpos = self.crest_sx, self.crest_sy, self.crest_texpos
+        for i = 1, self.crest_count do
+            paint(TILE_PEN, screen_x + c_sx[i], screen_y + c_sy[i], ' ', c_texpos[i], true)
         end
-        draw_crests(self.crest_list, screen_x, screen_y)
     end
-    draw(self.draw_list, port, screen_x, screen_y)
-    timed_since('frame', started)
+    self:draw(port, screen_x, screen_y)
+    timed_since('frame', now)
+end
+
+function WavesOverlay:status()
+    return ('caustics waves: %d wave, %d foam and %d spray flows in view, %d pieces planned, %d drawn, %d crests'):format(
+        wave_count, foam_count, spray_count, piece_count, self.draw_count, self.crest_count)
 end
 
 wave_painter = WavesOverlay{}
+-- Every "caustics ..." command runs this file again in the same environment: the classes get the new run's
+-- functions and the overlay goes on with the new run's painter and lists from its next frame. The lists of
+-- the run that was drawing until then are out of reach of the new functions, so each painter carries a
+-- status function of its own run, and the overlay notes the painter it draws with in state, which stays.
+local status, this_painter = WavesOverlay.status, wave_painter
+wave_painter.live_status = function() return status(this_painter) end
 end
+local painter = wave_painter
 
 CausticsOverlay = defclass(CausticsOverlay, overlay.OverlayWidget)
 CausticsOverlay.ATTRS{
@@ -1362,11 +1376,12 @@ function CausticsOverlay:overlay_onupdate() end
 
 function CausticsOverlay:onRenderFrame(dc)
     if not dfhack.isMapLoaded() then return end
-    if WAVES then wave_painter:onRenderFrame(dc) end
-    local t_start = os.clock()
     local vp = guidm.Viewport.get()
-    local list = water_map(vp)
-    if #list == 0 then return end
+    state.painter = painter
+    if WAVES then painter:onRenderFrame(dc, vp) end
+    local t_start = os.clock()
+    local water = water_map(vp)
+    if water.n == 0 then return end
     -- animation clock: real time, minus the time spent paused
     local real = dfhack.getTickCount()
     local paused = PAUSE_FREEZE and df.global.pause_state
@@ -1382,67 +1397,72 @@ function CausticsOverlay:onRenderFrame(dc)
     local rings = state.rings
     local ring_by_pos, ring_life = rings and rings.by_pos, rings and rings.life
     local nrings = 0
-    local getTexpos, paint = dfhack.textures.getTexposByHandle, dfhack.screen.paintTile
+    local getTexpos = dfhack.textures.getTexposByHandle
     local mvp = df.global.gps.main_viewport
-    local under, dim_y, under_n = UNDER_LAYER and mvp[UNDER_LAYER], mvp.dim_y, mvp.dim_x * mvp.dim_y
-    local texpos = {}  -- per direction, this frame's 16 tile textures
-    local pen = {ch=0, fg=COLOR_WHITE}
+    -- on this lower layer the waves and foam show on top of the caustics
+    local under, dim_x, dim_y = mvp[UNDER_LAYER], mvp.dim_x, mvp.dim_y
     local x1, y1, x2, y2 = vp.x1, vp.y1, vp.x2, vp.y2
+    -- the tiles' layer indexes worked out at the scan hold while the view is the one that was scanned
+    local same_view = water.fits and water.x1 == x1 and water.y1 == y1 and water.dim_x == dim_x and water.dim_y == dim_y
+    local tp = {}   -- this frame's 16 tile textures for the group being written
     local budget = BAKE_PER_FRAME
-    for i = 1, #list do
-        local p = list[i]
-        local key = p[3]
-        -- the sea: still-water pattern, no rings
-        if key == 'sea' and not SEA_COLS then key = 'none' end
-        local tp = texpos[key]
-        if tp == nil then
-            local set = state.sets[key]
-            if not set and budget > 0 then
-                budget = bake_some(key, budget)
-                set = state.sets[key]
-            end
-            tp = false  -- not baked yet: leave these tiles plain for now
-            if set then
-                tp = {}
-                local still_pace = key == 'none' or key == 'wash' or key == 'sea'
-                local frame = set[(still_pace and t_still or t_flow) + 1]
-                for k = 1, 16 do tp[k] = getTexpos(frame[k]) end
-            end
-            texpos[key] = tp
+    local groups, order = water.groups, water.order
+    for g = 1, #order do
+        local key = order[g]
+        local set = state.sets[key]
+        if not set and budget > 0 then
+            budget = bake_some(key, budget)
+            set = state.sets[key]
         end
-        local x, y = p[1], p[2]
-        if tp and x >= x1 and x <= x2 and y >= y1 and y <= y2 then
-            local k = (y % 4) * 4 + (x % 4) + 1
-            local tex = tp[k]
-            local evs = ring_by_pos and p[3] == 'none' and ring_by_pos[k]
-            if evs then
-                for j = 1, #evs do
-                    local e = evs[j]
-                    local age = (step_still - e.start) % STEPS
-                    if age < ring_life then
-                        -- one decision per tile per occurrence (step_still - age is its birth step)
-                        local h = (x * 73856093 ~ y * 19349663 ~ (step_still - age) * 83492791) & 0xffffffff
-                        h = ((h ~ (h >> 15)) * 0x2c1b3c6d) & 0xffffffff
-                        h = ((h ~ (h >> 12)) * 0x297a2d39) & 0xffffffff
-                        h = h ~ (h >> 15)
-                        if h % 1000 < RING_CHANCE then
-                            tex = getTexpos(e.tiles[age + 1]); nrings = nrings + 1
-                            break
+        -- (not baked yet: these tiles stay plain for now)
+        if set then
+            local group = groups[key]
+            local still_pace = key == 'none' or key == 'wash' or key == 'sea'
+            local frame = set[(still_pace and t_still or t_flow) + 1]
+            for k = 1, 16 do tp[k] = getTexpos(frame[k]) end
+            local gk = group.k
+            -- still water: rings; the sea has none
+            local evs_by_pos = key == 'none' and ring_by_pos
+            if same_view and not evs_by_pos then
+                local at = group.at
+                for i = 1, group.n do under[at[i]] = tp[gk[i]] end
+            else
+                local gx, gy = group.x, group.y
+                for i = 1, group.n do
+                    local x, y = gx[i], gy[i]
+                    local sx, sy = x - x1, y - y1
+                    if x >= x1 and x <= x2 and y >= y1 and y <= y2 and sx < dim_x and sy < dim_y then
+                        local k = gk[i]
+                        local tex = tp[k]
+                        local evs = evs_by_pos and evs_by_pos[k]
+                        if evs then
+                            for j = 1, #evs do
+                                local e = evs[j]
+                                local age = (step_still - e.start) % STEPS
+                                if age < ring_life then
+                                    -- one decision per tile per occurrence (step_still - age is its birth step)
+                                    local h = (x * 73856093 ~ y * 19349663 ~ (step_still - age) * 83492791) & 0xffffffff
+                                    h = ((h ~ (h >> 15)) * 0x2c1b3c6d) & 0xffffffff
+                                    h = ((h ~ (h >> 12)) * 0x297a2d39) & 0xffffffff
+                                    h = h ~ (h >> 15)
+                                    if h % 1000 < RING_CHANCE then
+                                        tex = getTexpos(e.tiles[age + 1]); nrings = nrings + 1
+                                        break
+                                    end
+                                end
+                            end
                         end
+                        under[sx * dim_y + sy] = tex
                     end
                 end
             end
-            -- on the lower layer other overlays' pictures (waves, foam) show on top of the caustics
-            local at = (x - x1) * dim_y + y - y1
-            if under and at >= 0 and at < under_n then under[at] = tex
-            else paint(pen, x - x1, y - y1, nil, tex, true) end
         end
     end
     -- ring textures are baked one event per frame, after the still frames are ready
     if budget == BAKE_PER_FRAME and state.sets.none and not (rings and rings.done) then bake_ring() end
     local s = state.stats
     local us = (os.clock() - t_start) * 1e6
-    s.n = s.n + 1; s.us = s.us + us; s.tiles = #list; s.rings = (s.rings or 0) + nrings
+    s.n = s.n + 1; s.us = s.us + us; s.tiles = water.n; s.rings = (s.rings or 0) + nrings
     if us > (s.max or 0) then s.max = us end
 end
 
@@ -1452,10 +1472,8 @@ if dfhack_flags.module then return end
 local cmd = ...
 if cmd == 'stats' then
     local s = state.stats
-    local dirs = {}
-    for _, p in ipairs(state.cache or {}) do dirs[p[3]] = (dirs[p[3]] or 0) + 1 end
     local parts = {}
-    for k, v in pairs(dirs) do parts[#parts + 1] = k .. '=' .. v end
+    for key, group in pairs(state.cache and state.cache.groups or {}) do parts[#parts + 1] = key .. '=' .. group.n end
     print(('river flow %s -> step %s ms (still water %d ms)'):format(tostring(state.flow), tostring(state.step_ms), STILL_MS))
     print(('frames %d, avg %.0f us/frame, max %.1f ms, water tiles %d, drift %s'):format(
         s.n, s.n > 0 and s.us / s.n or 0, (s.max or 0) / 1000, s.tiles or -1, table.concat(parts, ' ')))
@@ -1467,9 +1485,7 @@ end
 
 -- The overlay runs from the module copy of this script, so change settings there.
 local module = reqscript('caustics')
-if cmd == 'river' or cmd == 'auto' or cmd == 'side' or cmd == 'up' then
-    module.style = cmd
-elseif cmd == 'reload' then
+if cmd == 'reload' then
     module.reload_count = module.reload_count + 1
     module.sheets = nil
 elseif cmd == 'timing' then
@@ -1481,17 +1497,6 @@ elseif cmd == 'timing' then
     end
     module.timing = {}
     module.timing_since = dfhack.getTickCount()
-    return
-elseif cmd ~= 'waves' then
-    return
+elseif cmd == 'waves' then
+    print((module.state.painter or module.wave_painter).live_status())
 end
-
-local wave_count = 0
-if dfhack.isMapLoaded() then
-    for _, block in ipairs(df.global.world.map.map_blocks) do
-        for _, flow in ipairs(block.flows) do
-            if WAVE_FLOWS[flow.type] then wave_count = wave_count + 1 end
-        end
-    end
-end
-print(('caustics waves: style %s; %d wave and foam flows on the map'):format(module.style, wave_count))

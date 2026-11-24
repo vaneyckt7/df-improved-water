@@ -2,26 +2,30 @@
 
 `game/` holds the files as installed in `<Dwarf Fortress>/dfhack-config/scripts/`:
 
-- `caustics.lua` - the overlay script: caustics and ocean waves (river pattern is generated in Lua; still water plays baked frames)
+- `caustics.lua` - the overlay script: caustics and ocean waves. All water plays the baked frames of
+  `caustics_still.bin`; flowing water carries them along with the flow. Without that file no caustics are drawn.
 - `caustics_still.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint line, 2-3 bright, 4 very faint, 5 white, 6 shadow)
 - `caustics_rings.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
-- `caustics_fields.bin` - data for the river pattern
 
 Sea: salt water with no flow, on a map where the game has ocean waves (`world.event.ocean_waves`), shows the
-still-water caustics without rings. The foam and surf code (wave-following crests, shore surf, tiled sea) was
-removed after commit c8352cc; its data files and tools (`caustics_swell.bin`, `caustics_wavetile.bin`,
-`caustics_sea_*.bin`, `wavetiles.lua`, `tools/wavegif.py`, `swell.py`, `wavetile.py`, `seagif.py`) are still
-in the repo but no longer used by the script.
+still-water caustics without rings.
+
+Everything not used by the script was removed after the tag `locked-art-features` (commit 9a9ef2e) and can be
+found there: the generated river pattern (`caustics_fields.bin`), the old foam and surf data and tools
+(`caustics_swell.bin`, `caustics_wavetile.bin`, `caustics_sea_*.bin`, `wavetiles.lua`, `tools/wavegif.py`,
+`swell.py`, `wavetile.py`, `seagif.py`), the mod's older crest styles (`caustics side|up|auto`, `sidesheet.png`,
+`upsheet.png`, `riverbase.png`) and the trial tools for earlier still water and rings (`voro.py`, `post*.py`,
+`relabel.py`, `rings2.py`, `bake3.py`, `watersim3.py`, `compose.py`, `net.py`, `net2.py`, `fromimg.py`,
+`thick.py`, `halfdiff.py`, `straight.py`, `widen.py`, `pondcap.py`).
 
 The script also draws the ocean's waves (`WAVES = true` in the script; `false` = caustics only): the wash on
 the beach, foam, crests out at sea and spray. That part is the script of the Flowing Waves mod 1.3 by Poss
 (Steam Workshop 3829998283), copied into `caustics.lua` and changed. It is the mod author's work; ask them
 before publishing this anywhere. With it in our script, keep the mod's own overlay off
-(`overlay disable flowing_waves.waves`), or both draw. Commands: `caustics waves` (status),
-`caustics river|auto|side|up` (style), `caustics reload` (reload the wave art), `caustics timing`.
+(`overlay disable flowing_waves.waves`), or both draw. Commands: `caustics stats`, `caustics waves` (status),
+`caustics reload` (reload the wave art), `caustics timing`.
 
-Layers: the caustics are written to the map viewport layer `screentexpos_signpost` (`UNDER_LAYER`; `false`
-paints on the interface layer instead). The waves use the layers the mod used: `screentexpos_background`
+Layers: the caustics are written to the map viewport layer `screentexpos_signpost` (`UNDER_LAYER`). The waves use the layers the mod used: `screentexpos_background`
 (water under boulders), `screentexpos_background_two` (wash and foam, where that slot is free) and the
 interface layer (everything else), so waves and foam show over the caustics.
 
@@ -37,8 +41,7 @@ the sand on the first floor layer and the log lies in the water.
 - ours, built by `tools/fwsheets.py`: `seafoam.png` (foam on the beach and spray), `swell.png` (crests out at
   sea) and `riverfringe.png` (rock and pebble tiles beside the water: the water laps a few px onto the rock,
   with a foam rim)
-- the mod author's, recoloured with `tools/fwtint.py`: `riversheet.png`, `riverseafringe.png`, `riverbase.png`
-- the mod author's, unchanged: `sidesheet.png`, `upsheet.png` (the older crest styles)
+- the mod author's, recoloured with `tools/fwtint.py`: `riversheet.png`, `riverseafringe.png`
 
     python fwsheets.py ../game/caustics_waves_art preview.png
 
@@ -52,7 +55,7 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
   clumps in the line's own colour instead of single-pixel speckle. From two other models' advice; their
   further suggestions not done: uneven lumps instead of the regular sway, no white on the far-out stage.
 - Boulders on or beside a wave: the first floor layer under the boulder gets the same animated wash tile as
-  the tiles around it (`riverbase.png`, the flat tile used before, is loaded but no longer drawn). The wash
+  the tiles around it. The wash
   caustics run over a boulder under a wave like over any other wave tile, so it reads as under water. The olive square under a dry boulder is the
   game's own floor for that stone (still there with `WAVES = false`).
 - The game puts almost no wave flows on bare stone floor (2 of 35 such tiles in one high-tide view), only
@@ -67,8 +70,7 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
 - A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 
-`tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet`, `riverfringe`, `riverseafringe`,
-`riverbase`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
+`tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet`, `riverfringe`, `riverseafringe`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
 the mod's originals and writes into an output folder (the copies in `game/caustics_waves_art/` were made this way). It also writes a recoloured
 `riverfringe.png`: do not copy that one over ours. The
 wash colour is repeated in `fwsheets.py` (`WASH`).
@@ -102,35 +104,16 @@ animation's lightening (crest minus its background) times a strength (0.26 chose
 brighter steps pulled up to 40% toward the water's teal hue, solved for the overlay blend on in-game water
 of about RGB 1,78,90. `ringstrip.py` draws a mock-up strip of one ring over its life.
 
-Earlier rings (thin drawn circle in the caustic colours, 22 frames, up to commit b7c0aa5):
+Earlier still water and rings (drawn circles, a wobbling single picture, generated pebble nets, sliding Voronoi
+webs, a simulated wave surface) are in the history up to the tag `locked-art-features`, with their tools and the
+commands that built them in that version of this file.
 
-    python rings2.py caustics_still.bin caustics_rings.bin 4
-
-Also tried: the tileable variant `water_caustics_tileable_128_frames.gif` (band 0; liked less), and a
-single seamless picture bent by a looping 3 px wobble (commit 5dba3c2):
-
-    python fromimg.py <picture> caustics_still.bin 3 72,82,96.5   # wobble px, halo/line/white percentiles
-
-Trials kept as tools, not installed: `net2.py` (generated net of rounded pebbles with curved borders,
-shadow as level 6 = `STILL_SHADOW` in the script, e.g. `net2.py out.bin 4 30 2.6 0.56 7 4 0.86`) and
-`net.py` (first attempt, straight cell borders).
-
-Straight-line still water (two sliding Voronoi webs, 20 dots each; level 5 = line overlap, commit 19eff4a):
-
-    python voro.py tmp_X20.bin 5 20 7 90,97.5            # seed, dots, edge fade px, faint/overlap percentiles
-    python post3.py tmp_X20.bin still_Y20.bin 3 4.5 12   # cut long lines, despike, drop crumbs
-    python relabel.py still_Y20.bin caustics_still.bin   # overlaps: level 2 -> 5
-    python rings2.py caustics_still.bin caustics_rings.bin 4
-
-Earlier still water (curved lines from a simulated wave surface, commit 12e63f5):
-
-    python bake3.py tmp_S3.bin 21 4 8.5 40 1.4 0.95 0.6 93.5,97.6,99.4 1.5      # short-line wave field
-    python post2.py tmp_S3.bin still_V1.bin 3 4.5 10 1                           # cut, drop crumbs, tapered widening
-    python bake3.py tmp_LA.bin 33 2.5 5.5 28 1.4 0.95 0.6 94,99.9,99.95 0.5      # long thin lines
-    python compose.py still_V1.bin tmp_LA.bin caustics_still.bin
-    python rings2.py caustics_still.bin caustics_rings.bin 4
-
-`bake3.py measure <bin>`, `thick.py` and `halfdiff.py` print line length, thickness and turnover.
 `apply_still.sh` and `bg.py` install into a running game over DFHack RPC (paths are machine-specific).
+
+Speed (measured in game on a beach view of 38x25 tiles, 30 frames a second): the script reads the game's flags
+whole and tests bits, reads each tile type's properties once, keeps the water, the wave pieces and the draw
+list as parallel arrays, and plans the waves again only when the flows, the terrain or the view changed.
+It was checked against the version at the tag `locked-art-features`: both loaded side by side in the running
+game, each drawing the same frame into the map's screen layers, compared cell by cell.
 
 Never call `dfhack.textures.deleteHandle` when reloading (it crashed the game); old textures are leaked instead.

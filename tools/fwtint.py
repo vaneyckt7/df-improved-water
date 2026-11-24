@@ -5,7 +5,7 @@ beach should look lighter than the open sea, not darker.
 
 "-" keeps the colours; the opacity factor (default 1) multiplies every pixel's opacity.
 
-Reads the mod's own riversheet.png, riverfringe.png, riverseafringe.png and riverbase.png from the first
+Reads the mod's own riversheet.png, riverfringe.png and riverseafringe.png from the first
 folder (a copy of the originals) and writes recoloured ones into the second. Each colour channel is scaled
 toward white so that the sheets' base water colour BASE becomes the target colour.
 The results are derived from the mod author's art, so they are not kept in this repo.
@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 
 BASE = np.array([5.0, 81.0, 94.0])
-NAMES = ('riversheet.png', 'riverfringe.png', 'riverseafringe.png', 'riverbase.png')
+NAMES = ('riversheet.png', 'riverfringe.png', 'riverseafringe.png')
 
 if __name__ == '__main__':
     src, dst = sys.argv[1], sys.argv[2]
