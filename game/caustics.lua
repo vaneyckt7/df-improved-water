@@ -60,6 +60,9 @@ UNDER_LAYER = 'screentexpos_signpost'
 -- Flowing Waves mod draws thinner ones as foam). false = sea tiles only. Tiles holding an item, creature or
 -- building are left alone.
 SEA_WASH = 20
+-- Land the wave part below counts as under water although the game has no wave on it (see
+-- flood_islands); the caustics light those tiles too.
+local flooded = {list = {}, z = nil}
 -- The wash is lighter than the sea (about RGB 20,114,127 with the recoloured Flowing Waves sheets), and by
 -- the blend above the sea's line colours come out DARKER than it (measured: lines grey on the wash). These
 -- stronger ones lift it instead: level 1 line, 2 bright, 3 glint, 4 very faint, 5 white.
@@ -500,6 +503,22 @@ local function water_map(vp)
                 end
             end
         end
+        if WAVES and flooded.z == z0 then
+            for _, tile in ipairs(flooded.list) do
+                local x, y = tile.x, tile.y
+                if x >= vp.x1 and x <= vp.x2 and y >= vp.y1 and y <= vp.y2 then
+                    local at = (y - vp.y1 + M) * W + (x - vp.x1 + M)
+                    if not dm[at] and not water[at] then
+                        local d, occ = getFlags(x, y, z0)
+                        if d and not d.hidden and occ.building == 0
+                            and not (occ.item or occ.unit or occ.unit_grounded) then
+                            dm[at] = 'wash'
+                            list[#list + 1] = {x, y, 'wash'}
+                        end
+                    end
+                end
+            end
+        end
     end
     state.cache, state.key, state.cache_at, state.z = list, key, now, z0
     return list
@@ -713,6 +732,8 @@ local function classify(tiletype, x, y, z)
     end
     if shape == df.tiletype_shape.BOULDER then return 'boulder' end
     if shape == df.tiletype_shape.FLOOR and BEACH_MATERIALS[material] then return 'dry_beach' end
+    -- shrubs and saplings count as beach: they get the rim beside the water like the sand around them
+    if shape == df.tiletype_shape.SHRUB or shape == df.tiletype_shape.SAPLING then return 'dry_beach' end
     if (shape == df.tiletype_shape.FLOOR or shape == df.tiletype_shape.PEBBLES)
             and not BEACH_MATERIALS[material] then
         return 'rock'
@@ -723,6 +744,13 @@ end
 local function is_driftwood(x, y, z)
     local tiletype = dfhack.maps.getTileType(x, y, z)
     return tiletype and df.tiletype.attrs[tiletype].material == df.tiletype_material.DRIFTWOOD
+end
+
+-- Shrubs and saplings: like driftwood, the game draws them above the first floor layer.
+local function is_plant(x, y, z)
+    local tiletype = dfhack.maps.getTileType(x, y, z)
+    local shape = tiletype and df.tiletype.attrs[tiletype].shape
+    return shape == df.tiletype_shape.SHRUB or shape == df.tiletype_shape.SAPLING
 end
 
 local function tile_key(x, y, z)
@@ -855,6 +883,60 @@ local function find_waves(x1, y1, x2, y2, z)
         end
     end
     return waves, foam, spray
+end
+
+-- The game puts no wave on some land the water plainly covers: bare stone floor and some plant
+-- tiles get spray only, and stay dry squares in the middle of the wash. Such a tile is counted
+-- as a wave tile when it has a wave on all four sides, or water on three (a wave on at least
+-- one, the sea counts for the others); sand, which does get waves, must also have spray on it. Repeated a few times, so a short bar
+-- of rock goes under from its ends. Adds the tiles to `waves` and returns them.
+local FLOOD_PASSES = 4
+local FLOODABLE = {rock = true, dry_beach = true, boulder = true}
+local function flood_islands(waves, spray, z)
+    local wet, sprayed, found = {}, {}, {}
+    for _, wave in ipairs(waves) do wet[tile_key(wave.x, wave.y, 0)] = true end
+    for _, drop in ipairs(spray) do sprayed[tile_key(drop.x, drop.y, 0)] = true end
+    local first = 1
+    for _ = 1, FLOOD_PASSES do
+        local added, seen = {}, {}
+        for i = first, #waves do
+            local wave = waves[i]
+            for _, side in ipairs(SIDES) do
+                local x, y = wave.x + side.dx, wave.y + side.dy
+                local key = tile_key(x, y, 0)
+                if not wet[key] and not seen[key] then
+                    seen[key] = true
+                    local kind = terrain_at(x, y, z)
+                    -- natural ground only: a built floor or pier stays dry
+                    local tiletype = dfhack.maps.getTileType(x, y, z)
+                    local built = tiletype
+                        and df.tiletype.attrs[tiletype].material == df.tiletype_material.CONSTRUCTION
+                    if FLOODABLE[kind] and not built then
+                        -- sand gets real waves, so it must also have spray on it
+                        local needs_spray = kind == 'dry_beach' and not is_plant(x, y, z)
+                        local wave_sides, sea_sides = 0, 0
+                        for _, s in ipairs(SIDES) do
+                            local nx, ny = x + s.dx, y + s.dy
+                            if wet[tile_key(nx, ny, 0)] then wave_sides = wave_sides + 1
+                            elseif terrain_at(nx, ny, z) == 'sea' then sea_sides = sea_sides + 1 end
+                        end
+                        if wave_sides == 4 or (wave_sides + sea_sides >= 3
+                                and (sprayed[key] or not needs_spray)) then
+                            added[#added + 1] = {x = x, y = y}
+                        end
+                    end
+                end
+            end
+        end
+        if #added == 0 then break end
+        first = #waves + 1
+        for _, tile in ipairs(added) do
+            wet[tile_key(tile.x, tile.y, 0)] = true
+            waves[#waves + 1] = tile
+            found[#found + 1] = tile
+        end
+    end
+    return found
 end
 
 local function sign(n)
@@ -990,7 +1072,7 @@ local function plan_river(waves, foam, spray, z)
             -- on top of the map the wash came out see-through, so the sand under the log looked dry.
             -- There the wash takes the place of the sand, on the first floor layer, under the log.
             pieces[#pieces + 1] = piece(x, y, 'wash', wash_row(touches_sea, wet_sides, facing),
-                -(x * dir.dx + y * dir.dy), is_driftwood(x, y, z) and 'under' or 'floor')
+                -(x * dir.dx + y * dir.dy), (is_driftwood(x, y, z) or is_plant(x, y, z)) and 'under' or 'floor')
         end
     end
 
@@ -1093,7 +1175,7 @@ local function plan_river(waves, foam, spray, z)
     end
     for _, fringe in ipairs(fringe_list) do
         local fringe_piece = piece(fringe.x, fringe.y, fringe.is_sea and 'sea_fringe' or 'rock_fringe',
-            fringe_row(fringe.sides_facing_water), 0, 'top')
+            fringe_row(fringe.sides_facing_water), 0, fringe.is_sea and 'floor' or 'top')
         -- floor_flag draws the sand's edge on the sea; the sea fringe replaces it
         fringe_piece.clears_floor_flag = fringe.is_sea
         pieces[#pieces + 1] = fringe_piece
@@ -1206,8 +1288,10 @@ function WavesOverlay:rescan(viewport)
     end
     local planning = dfhack.getTickCount()
     if style == 'river' then
+        flooded.list, flooded.z = flood_islands(waves, spray, z), z
         self.pieces = plan_river(waves, foam, spray, z)
     else
+        flooded.list = {}
         self.pieces = plan_crests(waves, z)
     end
     self.draw_list_key = nil
@@ -1256,6 +1340,7 @@ local function draw(list, port, screen_x, screen_y)
         elseif layer == 'floor' and index and floor_two[index] == 0 then
             -- under dwarves, items and driftwood
             floor_two[index] = item.texpos
+            if item.clears_floor_flag then floor_flag[index] = 0 end
         else
             paint(TILE_PEN, screen_x + item.sx, screen_y + item.sy, ' ', item.texpos, true)
             if item.clears_floor_flag and index then floor_flag[index] = 0 end
