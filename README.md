@@ -56,17 +56,14 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
   caustics run over a boulder under a wave like over any other wave tile, so it reads as under water. The olive square under a dry boulder is the
   game's own floor for that stone (still there with `WAVES = false`).
 - The game puts almost no wave flows on bare stone floor (2 of 35 such tiles in one high-tide view), only
-  spray, which the game itself draws as blue streaks. See flooded land below.
+  spray, which the game itself draws as blue streaks. Those tiles stay rock with a rim, as islands in the wash.
 - The lip of wash on the sea tiles (`riverseafringe.png`) goes on the second floor layer, under the caustics,
   so the caustic lines cross it. (On the interface layer it covered them; `screentexpos_floor_flag` is a
   flag, not a picture slot: writing a picture there brought the game's frayed edge back.)
 - Shrubs and saplings under a wave: the wash goes on the first floor layer, like under driftwood, and the
   plant stands in the water. Dry, they count as beach and get the rim beside the water.
-- Flooded land (`flood_islands`): the game keeps waves off bare stone floor and off some plant tiles (they
-  get spray only), which left dry squares in the wash. A rock, boulder or plant tile with water on three
-  sides (a wave on at least one) is drawn as a wave tile; sand, which does get waves, only if it also has
-  spray on it, or a wave on all four sides. Up to 4 rounds per scan, so a short bar of rock goes under.
-  Built floors are left out. A patch of rock two tiles wide or more stays dry: no tile in it has three wet sides.
+- Dry squares in the wash are the game's: the script draws water only where the game has a wave. A rule
+  that guessed "under water" from the neighbours (`flood_islands`, commit ec2fd21) was taken out again.
 - A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 
