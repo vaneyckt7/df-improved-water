@@ -1,9 +1,20 @@
-# Water caustics overlay for Dwarf Fortress (DFHack)
+# Improved water for Dwarf Fortress (DFHack)
+
+A DFHack overlay that makes the water of Dwarf Fortress's graphics mode look alive. It only shows what the game
+itself has (its waves, flows and water tiles) and changes nothing in the fort:
+
+- ocean waves: the game tracks waves on the sea but graphics mode does not draw them. Here they wash up the
+  beach and pull back, leave foam on the sand, and show as crests out at sea and as spray
+- rock, pebbles, sand and grass beside the sea get a wet rim with a foam line
+- boulders, driftwood, shrubs and saplings under a wave stand in the water
+- light patterns (caustics) move over all water, and run along with the flow in rivers
+- ripple rings widen on still fresh water
 
 `game/` holds the files as installed in `<Dwarf Fortress>/dfhack-config/scripts/`:
 
-- `caustics.lua` - the overlay script: caustics and ocean waves. All water plays the baked frames of
-  `caustics_still.bin`; flowing water carries them along with the flow. Without that file no caustics are drawn.
+- `improved-water.lua` - the overlay script (DFHack overlay `improved-water.overlay`, command
+  `improved-water`). All water plays the baked caustic frames of `caustics_still.bin`; flowing water carries them along with the flow.
+  Without that file no caustics are drawn.
 - `caustics_still.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint line, 2-3 bright, 4 very faint, 5 white, 6 shadow)
 - `caustics_rings.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
 
@@ -20,10 +31,10 @@ found there: the generated river pattern (`caustics_fields.bin`), the old foam a
 
 The script also draws the ocean's waves (`WAVES = true` in the script; `false` = caustics only): the wash on
 the beach, foam, crests out at sea and spray. That part is the script of the Flowing Waves mod 1.3 by Poss
-(Steam Workshop 3829998283), copied into `caustics.lua` and changed. It is the mod author's work; ask them
+(Steam Workshop 3829998283), copied into `improved-water.lua` and changed. It is the mod author's work; ask them
 before publishing this anywhere. With it in our script, keep the mod's own overlay off
-(`overlay disable flowing_waves.waves`), or both draw. Commands: `caustics stats`, `caustics waves` (status),
-`caustics reload` (reload the wave art), `caustics timing`.
+(`overlay disable flowing_waves.waves`), or both draw. Commands: `improved-water stats`, `improved-water waves` (status),
+`improved-water reload` (reload the wave art), `improved-water timing`.
 
 Layers: the caustics are written to the map viewport layer `screentexpos_signpost` (`UNDER_LAYER`). The waves use the layers the mod used: `screentexpos_background`
 (water under boulders), `screentexpos_background_two` (wash and foam, where that slot is free) and the
@@ -93,7 +104,7 @@ the opposite edges before each frame is shrunk to 128x128 px. Levels by brightne
 
     python fromgif.py <animation.gif> caustics_still.bin 96 72,82,96.5   # blend band px, halo/line/white percentiles
     python ringgif.py <ripple.gif> caustics_still.bin caustics_rings.bin 4 7 28 0.72,0.54,0.40,0.28,0.17,0.08 0.5 0.6 7,8,9,10,11,12 1
-    python ringcols.py caustics.lua 0.26
+    python ringcols.py ../game/improved-water.lua 0.26
 
 Current rings: shape taken from a 128-frame animation of one widening ripple (not in this repo; the build
 used `~/Downloads/blue_bubble_ripple_128_frames.gif`, 768x768). `ringgif.py` reads its brightness profile

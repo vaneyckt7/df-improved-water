@@ -490,9 +490,9 @@ end
 -- become a draw list; every frame the list is written. All of these are kept as parallel arrays that are
 -- filled again in place, not as a table per tile.
 --
---   caustics waves                  show status
---   caustics reload                 reload the wave art, e.g. after rebuilding it
---   caustics timing                 time spent scanning, planning and drawing waves
+--   improved-water waves                  show status
+--   improved-water reload                 reload the wave art, e.g. after rebuilding it
+--   improved-water timing                 time spent scanning, planning and drawing waves
 ----------------------------------------------------------------------------------------------
 do
 local FRAMES = 16             -- every animation is 16 frames
@@ -538,7 +538,7 @@ local FLOW_DY = {-1, -1, 1, 1, -1, 1, 0, 0}
 local art_dir = dfhack.getDFPath() .. '/dfhack-config/scripts/caustics_waves_art/'
 
 -- DFHack keeps every image it has loaded for the rest of the session, keyed by path, so loading
--- the same path again gives the old picture. To pick up rebuilt art, `caustics reload` loads
+-- the same path again gives the old picture. To pick up rebuilt art, `improved-water reload` loads
 -- fresh copies from art/reloaded/ under new names.
 reload_count = reload_count or 0
 
@@ -570,7 +570,7 @@ end
 
 local SHEET_NAMES = {'wash', 'rock_fringe', 'sea_fringe', 'sea_foam', 'swell'}
 
--- Loaded on first use; `caustics reload` clears this. A file that is missing or unreadable gives an empty
+-- Loaded on first use; `improved-water reload` clears this. A file that is missing or unreadable gives an empty
 -- sheet: then no waves are drawn (the caustics still are) and it is said once, until the next reload.
 local function load_sheets()
     local loaded = {
@@ -583,8 +583,8 @@ local function load_sheets()
     for _, name in ipairs(SHEET_NAMES) do
         if not (loaded[name] and loaded[name][1]) then
             loaded.missing = name
-            dfhack.printerr('caustics: wave art sheet "' .. name .. '" did not load from ' .. art_dir
-                .. ' - no waves are drawn (caustics reload tries again)')
+            dfhack.printerr('improved-water: wave art sheet "' .. name .. '" did not load from ' .. art_dir
+                .. ' - no waves are drawn (improved-water reload tries again)')
             break
         end
     end
@@ -1093,7 +1093,7 @@ local function plan(z)
 end
 
 ----------------------------------------------------------------------------------------------
--- Timing (`caustics timing`)
+-- Timing (`improved-water timing`)
 ----------------------------------------------------------------------------------------------
 
 -- Time spent in each part since timing was last shown, and how many times it ran. DFHack's
@@ -1349,12 +1349,12 @@ function WavesOverlay:onRenderFrame(dc, viewport)
 end
 
 function WavesOverlay:status()
-    return ('caustics waves: %d wave, %d foam and %d spray flows in view, %d pieces planned, %d drawn, %d crests'):format(
+    return ('improved-water waves: %d wave, %d foam and %d spray flows in view, %d pieces planned, %d drawn, %d crests'):format(
         wave_count, foam_count, spray_count, piece_count, self.draw_count, self.crest_count)
 end
 
 wave_painter = WavesOverlay{}
--- Every "caustics ..." command runs this file again in the same environment: the classes get the new run's
+-- Every "improved-water ..." command runs this file again in the same environment: the classes get the new run's
 -- functions and the overlay goes on with the new run's painter and lists from its next frame. The lists of
 -- the run that was drawing until then are out of reach of the new functions, so each painter carries a
 -- status function of its own run, and the overlay notes the painter it draws with in state, which stays.
@@ -1484,13 +1484,13 @@ if cmd == 'stats' then
 end
 
 -- The overlay runs from the module copy of this script, so change settings there.
-local module = reqscript('caustics')
+local module = reqscript('improved-water')
 if cmd == 'reload' then
     module.reload_count = module.reload_count + 1
     module.sheets = nil
 elseif cmd == 'timing' then
     local seconds = math.max(1, dfhack.getTickCount() - module.timing_since) / 1000
-    print(('caustics waves: over the last %.1f s'):format(seconds))
+    print(('improved-water waves: over the last %.1f s'):format(seconds))
     for part, entry in pairs(module.timing) do
         print(('  %-14s %6d runs  %7.3f ms each  %6.1f ms a second'):format(
             part, entry.runs, entry.ms / math.max(1, entry.runs), entry.ms / seconds))
