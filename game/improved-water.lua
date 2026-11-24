@@ -319,10 +319,10 @@ local function water_map(vp)
             if not d then return end
             local des = d.whole
             if des & D_HIDDEN ~= 0 then return end
-            -- a bridge or other building here covers whatever is below it
-            local taken = occ.whole
-            if taken & O_BUILDING ~= 0 then return end
             if des & D_FLOW ~= 0 then
+                -- a bridge or other building here covers whatever is below it
+                local taken = occ.whole
+                if taken & O_BUILDING ~= 0 then return end
                 if des & D_MAGMA == 0 then
                     local k = (y - y1 + M) * W + (x - x1 + M)
                     local block_key = (x >> 4) + (y >> 4) * 4096 + z * 16777216
@@ -340,8 +340,9 @@ local function water_map(vp)
                 end
                 return
             end
+            -- (ground ends the look down, so only open space needs the building test)
             local tt = getType(x, y, z)
-            if not tt or not OPEN[tt] then return end
+            if not tt or not OPEN[tt] or occ.whole & O_BUILDING ~= 0 then return end
         end
     end
     -- The view and one tile around it. Only flowing water needs the wider margin (its drift is averaged
@@ -497,7 +498,6 @@ end
 do
 local FRAMES = 16             -- every animation is 16 frames
 local TICKS_PER_FRAME = 10    -- the brook animation's pace: about 10 frames a second
-local MS_PER_TICK = 10        -- normal speed: the game's 100 ticks a second
 local RESCAN_MS = 100         -- how often to look for wave flows again
 local FORGET_FOAM_MS = 1000   -- how often to drop foam that has gone
 local TERRAIN_RECHECK_MS = 1000  -- how often to check known tiles for digging and building
@@ -794,47 +794,46 @@ local function find_flows(x1, y1, x2, y2, z, tick)
                     local density = flow.density
                     local flow_type = density > 0 and flow.type
                     if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
+                        -- (a block's flows are all on the block's own level)
                         local pos = flow.pos
-                        if pos.z == z then
-                            local x, y = pos.x, pos.y
-                            local key = x + y * 4096
-                            local code
-                            if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
-                                waves = waves + 1
-                                wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
-                                code = key
-                            elseif flow_type == Steam then
-                                local stage = density * FOAM_STAGES // SPRAY_FULL
-                                if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
-                                sprays = sprays + 1
-                                spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
-                                code = key + 33554432 + stage * 67108864
+                        local x, y = pos.x, pos.y
+                        local key = x + y * 4096
+                        local code
+                        if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
+                            waves = waves + 1
+                            wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
+                            code = key
+                        elseif flow_type == Steam then
+                            local stage = density * FOAM_STAGES // SPRAY_FULL
+                            if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                            sprays = sprays + 1
+                            spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
+                            code = key + 33554432 + stage * 67108864
+                        else
+                            local stage
+                            if flow_type == OceanWave then
+                                -- the wave's last thin water, broken up into foam
+                                stage = density * FOAM_STAGES // WAVE_FOAM_BELOW
                             else
-                                local stage
-                                if flow_type == OceanWave then
-                                    -- the wave's last thin water, broken up into foam
-                                    stage = density * FOAM_STAGES // WAVE_FOAM_BELOW
-                                else
-                                    local full = key + zkey
-                                    local born = foam_density[full]
-                                    if not born or density > born then
-                                        born = density
-                                        foam_density[full] = born
-                                    end
-                                    foam_seen[full] = tick
-                                    stage = math.floor(density / born * FOAM_STAGES)
-                                    if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
-                                    if stage < 0 then stage = 0 end
+                                local full = key + zkey
+                                local born = foam_density[full]
+                                if not born or density > born then
+                                    born = density
+                                    foam_density[full] = born
                                 end
-                                foams = foams + 1
-                                foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
-                                code = key + 16777216 + stage * 67108864
+                                foam_seen[full] = tick
+                                stage = math.floor(density / born * FOAM_STAGES)
+                                if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                                if stage < 0 then stage = 0 end
                             end
-                            n = n + 1
-                            if found[n] ~= code then
-                                found[n] = code
-                                same = false
-                            end
+                            foams = foams + 1
+                            foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
+                            code = key + 16777216 + stage * 67108864
+                        end
+                        n = n + 1
+                        if found[n] ~= code then
+                            found[n] = code
+                            same = false
                         end
                     end
                 end
@@ -1298,12 +1297,11 @@ function WavesOverlay:onRenderFrame(dc, viewport)
 
     local x1, y1, z = viewport.x1, viewport.y1, viewport.z
     local tick = df.global.cur_year_tick
-    local adventure = dfhack.world.isAdventureMode()
     if now >= self.next_scan then
-        -- In fort mode the flows only change when the game ticks. While it stands still (paused), they
+        -- The flows only change when the game ticks. While it stands still (paused), they
         -- are read again only when the view or the caustics' water list has changed, and once per
         -- terrain round.
-        if adventure or tick ~= self.scan_tick or self.replan or now >= self.next_terrain_round
+        if tick ~= self.scan_tick or self.replan or now >= self.next_terrain_round
                 or state.view_id ~= self.scan_water or z ~= self.scan_z or x1 ~= self.scan_x1 or y1 ~= self.scan_y1
                 or viewport.x2 ~= self.scan_x2 or viewport.y2 ~= self.scan_y2 then
             self:rescan(viewport, now, tick)
@@ -1313,10 +1311,8 @@ function WavesOverlay:onRenderFrame(dc, viewport)
     local any_crests = #df.global.world.event.ocean_waves > 0
     if piece_count == 0 and not any_crests then return end
 
-    -- animations run on game time, so they stop when the game is paused; but adventure mode's time
-    -- only moves as the adventurer acts, so there they run on real time, at normal speed's pace
-    -- (the waves themselves are the game's, and still move only as it runs)
-    local step = adventure and now // (TICKS_PER_FRAME * MS_PER_TICK) or tick // TICKS_PER_FRAME
+    -- animations run on game time, so they stop when the game is paused
+    local step = tick // TICKS_PER_FRAME
     local port = df.global.gps.main_viewport
     local dim_x, dim_y = port.dim_x, port.dim_y
     local view_moved = x1 ~= self.list_x1 or y1 ~= self.list_y1 or z ~= self.list_z
