@@ -1531,8 +1531,8 @@ wave_painter.live_status = function() return status(this_painter) end
 end
 local painter = wave_painter
 
-CausticsOverlay = defclass(CausticsOverlay, overlay.OverlayWidget)
-CausticsOverlay.ATTRS{
+ImprovedWaterOverlay = defclass(ImprovedWaterOverlay, overlay.OverlayWidget)
+ImprovedWaterOverlay.ATTRS{
     desc='Caustics on water, and the ocean waves and sea foam that graphics mode leaves out.',
     viewscreens='dwarfmode',
     default_enabled=true,
@@ -1540,7 +1540,7 @@ CausticsOverlay.ATTRS{
 }
 
 -- the overlay framework calls this unconditionally for some widget configs
-function CausticsOverlay:overlay_onupdate() end
+function ImprovedWaterOverlay:overlay_onupdate() end
 
 -- Which still-water tiles show a ring changes only with the still water's step (every STILL_MS), not every
 -- frame. So what was worked out for a step is kept: per tile its place in the screen layer, its place in
@@ -1553,7 +1553,7 @@ local draw_frame
 -- An error in here would come back every frame and would also stop the DFHack overlays drawn after this
 -- one (a later version of the game renaming something this script reads would do it). So the first error
 -- is reported once and the script then draws nothing until `improved-water retry` (or the next game start).
-function CausticsOverlay:onRenderFrame(dc)
+function ImprovedWaterOverlay:onRenderFrame(dc)
     if state.failed or not dfhack.isMapLoaded() or not dfhack.screen.inGraphicsMode() then return end
     local ok, err = xpcall(draw_frame, debug.traceback, self, dc)
     if not ok then
@@ -1674,7 +1674,7 @@ function draw_frame(self, dc)
     if us > (s.max or 0) then s.max = us end
 end
 
-OVERLAY_WIDGETS = {overlay=CausticsOverlay}
+OVERLAY_WIDGETS = {overlay=ImprovedWaterOverlay}
 
 if dfhack_flags.module then return end
 local cmd = ...
