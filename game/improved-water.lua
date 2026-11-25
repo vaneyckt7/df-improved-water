@@ -613,8 +613,10 @@ local function load_tiles(name)
     end
     file:close()
     if packed_rows * FRAMES ~= #tiles then
-        dfhack.printerr(('improved-water: %s has %d rows but its .rows file expects %d (after updating the '
-            .. 'files in a running game, run: improved-water reload)'):format(name, #tiles // FRAMES, packed_rows))
+        dfhack.printerr(('improved-water: %s holds %d tiles but its .rows file expects %d. If the files were '
+            .. 'updated in a running game, run: improved-water reload. If that does not help, the two files '
+            .. 'do not belong together: copy both in again, or run tools/pack_sheets.py on the folder.')
+            :format(name, #tiles, packed_rows * FRAMES))
         return {}
     end
     local full = {}

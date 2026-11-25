@@ -34,8 +34,9 @@ The script only draws; it writes nothing to the fort or the save. (`improved-wat
 art in `improved-water-art/reloaded/`.)
 
 Updating while the game is running: after copying new files in, run `improved-water reload`. DFHack keeps
-the art it has already loaded, so without it the new script draws from the old sheets and picks wrong
-pictures. Restarting the game does the same job.
+the art it has already loaded, so without it the new script meets the old sheets: it then reports that a
+sheet does not fit its `.rows` file and draws no waves, or, where the layout changed without one, picks
+wrong pictures. Restarting the game does the same job.
 
 ## Files
 
@@ -145,7 +146,8 @@ Measured in game: a see-through pixel shows as colour x opacity x opacity over t
 the uncorrected teal wash turned mud brown), so the tool divides the colour by the opacity. With that
 correction, 70% teal over red sand comes out grey.
 
-`tools/` rebuilds the still-water files (Python with numpy, scipy, Pillow).
+`tools/` rebuilds the still-water files and the wave art sheets, and packs the sheets (Python with numpy,
+scipy, Pillow; `pack_sheets.py` needs Pillow only).
 
 Current still water: taken from a 128-frame looping grayscale caustics animation (not in this repo; the
 bake used `~/Downloads/water_caustics_128_frames.gif`, 768x768, 80 ms per frame). Its frames are used one
