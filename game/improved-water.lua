@@ -847,7 +847,7 @@ local found, found_count = {}, 0
 -- dfhack.maps.readFlows reads a block's flows in one call into the game (measured: a scan in about a
 -- quarter of the time, the densities alone in a sixth). It is not in every DFHack: without it, or with
 -- one that answers differently from the one this was written for, the flows are read one field at a
--- time. Both ways list the same flows in the same order.
+-- time. Each way has its own scan and its own check below; both list the same flows in the same order.
 local READ_SCAN = {include_dead = true, fields = {'type', 'density', 'x', 'y'}}
 local READ_DENSITY = {include_dead = true, fields = {'density'}}
 local flows_read = {}
@@ -871,34 +871,23 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
-            local flows, count, types, densities, xs, ys
-            if readFlows then
-                local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_SCAN, flows_read)
-                count, types, densities, xs, ys = read.n, read.type, read.density, read.x, read.y
-            else
-                local block = getTileBlock(block_x, block_y, z)
-                flows = block and block.flows
+            local block = getTileBlock(block_x, block_y, z)
+            local flows = block and block.flows
+            if flows then
                 -- (indexed: ipairs over one of the game's lists takes four times as long per item)
-                count = flows and #flows
-            end
-            if count then
+                local count = #flows
                 local place = listed + 1
                 listed = listed + count
                 for i = 0, count - 1 do
-                    local flow = flows and flows[i]
-                    local density = flow and flow.density or densities[i + 1]
+                    local flow = flows[i]
+                    local density = flow.density
                     density_sum = density_sum + density
                     weighted = weighted + density * (place + i)
-                    local flow_type = density > 0 and (flow and flow.type or types[i + 1])
+                    local flow_type = density > 0 and flow.type
                     if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
                         -- (a block's flows are all on the block's own level)
-                        local x, y
-                        if flow then
-                            local pos = flow.pos
-                            x, y = pos.x, pos.y
-                        else
-                            x, y = xs[i + 1], ys[i + 1]
-                        end
+                        local pos = flow.pos
+                        local x, y = pos.x, pos.y
                         local key = x + y * 4096
                         local code
                         if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
@@ -953,6 +942,83 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     return same
 end
 
+-- The same scan, reading each block's flows with one dfhack.maps.readFlows call.
+local function find_flows_read(x1, y1, x2, y2, z, tick)
+    local OceanWave, SeaFoam, Steam = df.flow_type.OceanWave, df.flow_type.SeaFoam, df.flow_type.Steam
+    local zkey = z * 16777216
+    local waves, foams, sprays, n, same = 0, 0, 0, 0, true
+    local remembered = 0
+    local listed, density_sum, weighted = 0, 0, 0
+    for block_y = y1 - y1 % 16, y2, 16 do
+        for block_x = x1 - x1 % 16, x2, 16 do
+            local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_SCAN, flows_read)
+            local count = read.n
+            if count > 0 then
+                local types, densities, xs, ys = read.type, read.density, read.x, read.y
+                local place = listed
+                listed = listed + count
+                for i = 1, count do
+                    local density = densities[i]
+                    density_sum = density_sum + density
+                    weighted = weighted + density * (place + i)
+                    local flow_type = density > 0 and types[i]
+                    if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
+                        local x, y = xs[i], ys[i]
+                        local key = x + y * 4096
+                        local code
+                        if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
+                            waves = waves + 1
+                            wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
+                            code = key
+                        elseif flow_type == Steam then
+                            local stage = density * FOAM_STAGES // SPRAY_FULL
+                            if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                            sprays = sprays + 1
+                            spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
+                            code = key + 33554432 + stage * 67108864
+                        else
+                            local stage
+                            if flow_type == OceanWave then
+                                -- the wave's last thin water, broken up into foam
+                                stage = density * FOAM_STAGES // WAVE_FOAM_BELOW
+                            else
+                                local full = key + zkey
+                                local born = foam_density[full]
+                                if not born or density > born then
+                                    born = density
+                                    foam_density[full] = born
+                                end
+                                foam_seen[full] = tick
+                                remembered = remembered + 1
+                                foam_full[remembered] = full
+                                stage = math.floor(density / born * FOAM_STAGES)
+                                if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                                if stage < 0 then stage = 0 end
+                            end
+                            foams = foams + 1
+                            foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
+                            code = key + 16777216 + stage * 67108864
+                        end
+                        n = n + 1
+                        if found[n] ~= code then
+                            found[n] = code
+                            same = false
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if n ~= found_count then same = false end
+    wave_count, foam_count, spray_count, found_count = waves, foams, sprays, n
+    foam_full_count = remembered
+    flows_listed, flows_density, flows_weighted = listed, density_sum, weighted
+    seen_waves.n, seen_waves.z, seen_waves.tick = waves, z, tick
+    seen_waves.x1, seen_waves.y1, seen_waves.x2, seen_waves.y2 = x1, y1, x2, y2
+    return same
+end
+if readFlows then find_flows = find_flows_read end
+
 -- Between the game's own flow updates (see FLOW_TICKS) a flow can still start: steam where magma meets
 -- water, on any tick. The game then adds a flow, or brings a spent one back to full, or tops one up: each
 -- raises the densities added up. Other kinds of flow (fire, dust, smoke) fade on any tick too, so a second
@@ -962,34 +1028,42 @@ local function flows_untouched(x1, y1, x2, y2, z)
     local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
-            if readFlows then
-                local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_DENSITY, flows_read)
-                local densities = read.density
-                local place = listed
-                listed = listed + read.n
-                for i = 1, read.n do
-                    local density = densities[i]
+            local block = getTileBlock(block_x, block_y, z)
+            local flows = block and block.flows
+            if flows then
+                local count = #flows
+                local place = listed + 1
+                listed = listed + count
+                for i = 0, count - 1 do
+                    local density = flows[i].density
                     density_sum = density_sum + density
                     weighted = weighted + density * (place + i)
-                end
-            else
-                local block = getTileBlock(block_x, block_y, z)
-                local flows = block and block.flows
-                if flows then
-                    local count = #flows
-                    local place = listed + 1
-                    listed = listed + count
-                    for i = 0, count - 1 do
-                        local density = flows[i].density
-                        density_sum = density_sum + density
-                        weighted = weighted + density * (place + i)
-                    end
                 end
             end
         end
     end
     return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
 end
+
+-- The same check with dfhack.maps.readFlows.
+local function flows_untouched_read(x1, y1, x2, y2, z)
+    local listed, density_sum, weighted = 0, 0, 0
+    for block_y = y1 - y1 % 16, y2, 16 do
+        for block_x = x1 - x1 % 16, x2, 16 do
+            local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_DENSITY, flows_read)
+            local densities = read.density
+            local place = listed
+            listed = listed + read.n
+            for i = 1, read.n do
+                local density = densities[i]
+                density_sum = density_sum + density
+                weighted = weighted + density * (place + i)
+            end
+        end
+    end
+    return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
+end
+if readFlows then flows_untouched = flows_untouched_read end
 
 ----------------------------------------------------------------------------------------------
 -- Planning what to draw
