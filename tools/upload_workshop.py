@@ -1,11 +1,12 @@
 """Upload the built mod folder to the Steam Workshop through the running Steam client.
 
-    python tools/upload_workshop.py <libsteam_api library> [mod folder] [private|friends|public]
+    python tools/upload_workshop.py <libsteam_api library> [mod folder] [private|friends|public|text]
 
 Reads title, tags, key-value tags, change note and the item number from the folder's info.txt and
 the page text from steam/workshop_description.txt. Without [STEAM_FILE_ID:...] in info.txt a new
 item is created and its number is written to steam/info.txt and the folder's info.txt before the
-files go up. Visibility is set in the same update as the files (default: private). Steam must be
+files go up. With 'text' only the title and page text are sent (no files, tags or visibility
+change). Visibility is set in the same update as the files (default: private). Steam must be
 running and logged in to an account that owns Dwarf Fortress. Any game's copy of the library
 (libsteam_api.dylib / .so / steam_api64.dll) will do.
 """
@@ -81,7 +82,9 @@ def main():
         sys.exit(__doc__)
     library = sys.argv[1]
     folder = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, 'dist', 'improved_water'))
-    visibility = VISIBILITY[sys.argv[3] if len(sys.argv) > 3 else 'private']
+    mode = sys.argv[3] if len(sys.argv) > 3 else 'private'
+    text_only = mode == 'text'
+    visibility = None if text_only else VISIBILITY[mode]
     info_path = os.path.join(folder, 'info.txt')
     info = open(info_path, encoding='utf-8').read()
 
@@ -144,21 +147,24 @@ def main():
         strings = (ctypes.c_char_p * len(tags))(*[tag.encode() for tag in tags])
         array = StringArray(strings, len(tags))
         steps = [
-            ('visibility', api.SteamAPI_ISteamUGC_SetItemVisibility(ugc, update, visibility)),
             ('title', api.SteamAPI_ISteamUGC_SetItemTitle(ugc, update, title.encode())),
             ('description', api.SteamAPI_ISteamUGC_SetItemDescription(ugc, update, description.encode())),
-            ('tags', api.SteamAPI_ISteamUGC_SetItemTags(ugc, update, ctypes.byref(array), False)),
-            ('content', api.SteamAPI_ISteamUGC_SetItemContent(ugc, update, folder.encode())),
-            ('preview', api.SteamAPI_ISteamUGC_SetItemPreview(ugc, update, preview.encode())),
         ]
-        for key, value in pairs:
-            steps.append(('key-value tag ' + key, api.SteamAPI_ISteamUGC_AddItemKeyValueTag(ugc, update, key.encode(), value.encode())))
+        if not text_only:
+            steps += [
+                ('visibility', api.SteamAPI_ISteamUGC_SetItemVisibility(ugc, update, visibility)),
+                ('tags', api.SteamAPI_ISteamUGC_SetItemTags(ugc, update, ctypes.byref(array), False)),
+                ('content', api.SteamAPI_ISteamUGC_SetItemContent(ugc, update, folder.encode())),
+                ('preview', api.SteamAPI_ISteamUGC_SetItemPreview(ugc, update, preview.encode())),
+            ]
+            for key, value in pairs:
+                steps.append(('key-value tag ' + key, api.SteamAPI_ISteamUGC_AddItemKeyValueTag(ugc, update, key.encode(), value.encode())))
         refused = [name for name, ok in steps if not ok]
         if refused:
             sys.exit('Steam refused: %s (item %d left as it was)' % (', '.join(refused), file_id))
-        done = wait_for(api, pipe, api.SteamAPI_ISteamUGC_SubmitItemUpdate(ugc, update, note.encode()), SubmitResult, 3404)
+        done = wait_for(api, pipe, api.SteamAPI_ISteamUGC_SubmitItemUpdate(ugc, update, None if text_only else note.encode()), SubmitResult, 3404)
         print('upload result', done.result, '(1 is success) | item', file_id, '| tags', ', '.join(tags),
-              '| visibility', [k for k, v in VISIBILITY.items() if v == visibility][0],
+              '| mode', mode,
               '| Workshop agreement still to accept:', done.needs_agreement)
         if done.result != 1:
             sys.exit(1)

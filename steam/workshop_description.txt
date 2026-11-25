@@ -1,32 +1,31 @@
-[h1]Improved Water[/h1]
-
 A DFHack overlay that makes the water in graphics mode look alive. It only shows what the game itself already tracks (its waves, flows and water tiles) and changes nothing in your fort or your save.
 
+[h2]What it draws[/h2]
 [list]
-[*]Ocean waves: the game simulates waves on the sea, but graphics mode does not draw them. Here they wash up the beach and pull back, leave foam on the sand, and show as crests and spray out at sea.
-[*]Rock, pebbles, sand and grass beside the sea get a wet rim with a foam line.
-[*]Boulders, driftwood, shrubs and saplings under a wave stand in the water.
-[*]Light patterns (caustics) move over all water, and run along with the current in rivers.
-[*]Ripple rings widen on still fresh water.
+[*][b]Ocean waves.[/b] The game simulates waves on the sea, but graphics mode does not draw them. Here they wash up the beach and pull back, leave foam on the sand, and show as crests and spray out at sea.
+[*][b]Wet shores.[/b] Rock, pebbles, sand and grass beside the sea get a wet rim with a foam line.
+[*][b]Things in the surf.[/b] Boulders, driftwood, shrubs and saplings under a wave stand in the water.
+[*][b]Light on the water.[/b] Light patterns (caustics) move over all water, and run along with the current in rivers.
+[*][b]Ripples.[/b] Ripple rings widen on still fresh water.
 [/list]
 
-[h2]Inspired by Flowing Waves[/h2]
-
-This mod exists because of [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3829998283]Flowing Waves by Poss[/url]. Their mod was the first we saw that drew the game's hidden ocean waves, and we wanted to see how far we could push that idea. The wave drawing here started from their script, and the wash on the beach and the lip of water on the sea tiles are still their art, recoloured. All credit for the original idea and that art goes to Poss. If you like this, go and rate their mod too.
-
-You do not need Flowing Waves installed. If you have both, switch one of them off, or both will draw waves: [code]overlay disable flowing_waves.waves[/code]
-
 [h2]Requirements[/h2]
-
 [list]
 [*]Dwarf Fortress 53.17 (Steam) with graphics mode
 [*]DFHack 53.17-r1
 [/list]
+Works in existing forts. It does not need to be added to a world.
 
 [h2]Commands[/h2]
-
+Type these in the DFHack console:
 [list]
-[*][code]overlay disable improved-water.overlay[/code] / [code]overlay enable improved-water.overlay[/code]: switch it off and on
-[*][code]improved-water reload[/code]: reload the art after updating the mod in a running game
-[*][code]improved-water retry[/code]: start drawing again after a reported error
+[*][b]overlay disable improved-water.overlay[/b] switches it off
+[*][b]overlay enable improved-water.overlay[/b] switches it back on
+[*][b]improved-water reload[/b] reloads the art after the mod updates in a running game
+[*][b]improved-water retry[/b] starts drawing again after a reported error
 [/list]
+
+[h2]Inspired by Flowing Waves[/h2]
+This mod exists because of [url=https://steamcommunity.com/sharedfiles/filedetails/?id=3829998283]Flowing Waves by Poss[/url]. Their mod was the first we saw that drew the game's hidden ocean waves, and we wanted to see how far we could push that idea. The wave drawing here started from their script, and the wash on the beach and the lip of water on the sea tiles are still their art, recoloured. All credit for the original idea and that art goes to Poss. If you like this, go and rate their mod too.
+
+You do not need Flowing Waves installed. If you have both, switch one of them off or both will draw waves. To switch Flowing Waves off: [b]overlay disable flowing_waves.waves[/b]
