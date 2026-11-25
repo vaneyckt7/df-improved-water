@@ -1285,7 +1285,38 @@ end
 -- Writes the draw list. The map's screen layers are rebuilt by the game every frame and drawn
 -- after overlays render, so anything written to them lasts exactly one frame and has to be
 -- written again each frame.
-function WavesOverlay:draw(port, screen_x, screen_y)
+-- Fog. In fog the game draws its haze on the interface layer of every map tile in view, and fills that
+-- layer in after this overlay has painted (measured: 187 pieces painted, all 187 there right after, none
+-- left when the frame is shown). So in fog every piece painted on top (foam rims, foam, spray, crests) was
+-- lost. The layer's copy of the last frame tells: in fog nearly all of it is filled, in clear weather
+-- only this script's pieces and the odd steam cloud are. In fog the pieces go to the layer just below
+-- instead, and show through the haze like the rest of the map. (A single steam cloud hides the piece
+-- under it in the same way; that is left as it is.)
+local FOG_LAYER = 'screentexpos_designation'
+
+-- Pieces painted on top fill the layer themselves, and pieces moved below do not, so the count of clear
+-- tiles shifts by up to the number of pieces when the answer changes. Once in fog, that many more clear
+-- tiles are needed to leave it again, or a view on the limit would flip every frame.
+local in_fog, fog_pieces = false, 0
+
+local function fog_in_view(port)
+    local last_top = port.screentexpos_interface_old
+    local cells = port.dim_x * port.dim_y
+    local clear_left = cells // 10   -- more clear tiles than this and it is not fog
+    if in_fog then clear_left = clear_left + fog_pieces end
+    in_fog = false
+    for i = 0, cells - 1 do
+        if last_top[i] == 0 then
+            clear_left = clear_left - 1
+            if clear_left < 0 then return false end
+        end
+    end
+    in_fog = true
+    return true
+end
+
+function WavesOverlay:draw(port, screen_x, screen_y, fog)
+    local under_fog = port[FOG_LAYER]
     local floor_two = port.screentexpos_background_two
     local floor_one = port.screentexpos_background
     local floor_flag = port.screentexpos_floor_flag
@@ -1303,7 +1334,11 @@ function WavesOverlay:draw(port, screen_x, screen_y)
             floor_two[index] = d_texpos[i]
             if d_clears[i] then floor_flag[index] = 0 end
         else
-            paint(TILE_PEN, screen_x + d_sx[i], screen_y + d_sy[i], ' ', d_texpos[i], true)
+            if fog and index >= 0 then
+                under_fog[index] = d_texpos[i]
+            else
+                paint(TILE_PEN, screen_x + d_sx[i], screen_y + d_sy[i], ' ', d_texpos[i], true)
+            end
             if index >= 0 and d_clears[i] then floor_flag[index] = 0 end
         end
     end
@@ -1448,14 +1483,22 @@ function WavesOverlay:onRenderFrame(dc, viewport)
 
     -- the same screen origin the painter would use for map tiles
     local screen_x, screen_y = dc.x1, dc.y1
+    local fog = fog_in_view(port)
     if any_crests then
         local paint = dfhack.screen.paintTile
         local c_sx, c_sy, c_texpos = self.crest_sx, self.crest_sy, self.crest_texpos
+        local under_fog, view_dim_x, view_dim_y = port[FOG_LAYER], port.dim_x, port.dim_y
         for i = 1, self.crest_count do
-            paint(TILE_PEN, screen_x + c_sx[i], screen_y + c_sy[i], ' ', c_texpos[i], true)
+            local sx, sy = c_sx[i], c_sy[i]
+            if fog and sx >= 0 and sy >= 0 and sx < view_dim_x and sy < view_dim_y then
+                under_fog[sx * view_dim_y + sy] = c_texpos[i]
+            else
+                paint(TILE_PEN, screen_x + sx, screen_y + sy, ' ', c_texpos[i], true)
+            end
         end
     end
-    self:draw(port, screen_x, screen_y)
+    self:draw(port, screen_x, screen_y, fog)
+    if fog then fog_pieces = self.draw_count + self.crest_count end
     timed_since('frame', now)
 end
 
