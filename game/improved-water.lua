@@ -49,7 +49,6 @@ WASH_COLS = {0x91FFFF40, 0x9EFFFF50, 0xADFFFFA0, 0x85FFFF40, 0xB8FFFF70}   -- li
 -- WAVES: also draw the ocean's waves, wash, foam and spray (see the WAVES part below). false = caustics only.
 WAVES = true
 state = state or {}
-state.failed = nil   -- loading the script again gives it a fresh try (see CausticsOverlay:onRenderFrame)
 
 -- The data files and the art folder lie beside this script, wherever it was installed. If they are not
 -- there, the place they were always copied to (dfhack-config/scripts) is tried.
@@ -211,7 +210,14 @@ end
 local function bake_ring()
     -- the ring clips are cut from the simulated frames, so without those there are no rings
     local rd = load_still() and load_rings()
-    if not rd then state.rings = {done = true}; return end
+    if not rd then
+        state.rings = {done = true}
+        if load_still() then
+            dfhack.printerr('improved-water: caustics_rings.bin is missing from ' .. DATA_DIR
+                .. ' or the wrong size; no ripple rings are drawn')
+        end
+        return
+    end
     local r = state.rings or {n = 0, list = {}}
     state.rings = r
     local e = build_ring(rd, r.n)
@@ -1552,14 +1558,14 @@ local draw_frame
 
 -- An error in here would come back every frame and would also stop the DFHack overlays drawn after this
 -- one (a later version of the game renaming something this script reads would do it). So the first error
--- is reported once and the script then draws nothing until it is loaded again.
+-- is reported once and the script then draws nothing until `improved-water retry` (or the next game start).
 function CausticsOverlay:onRenderFrame(dc)
     if state.failed or not dfhack.isMapLoaded() or not dfhack.screen.inGraphicsMode() then return end
     local ok, err = xpcall(draw_frame, debug.traceback, self, dc)
     if not ok then
         state.failed = true
         dfhack.printerr('improved-water: stopped drawing after an error (this version of the script may not match '
-            .. 'this version of the game). To try again: improved-water reload\n' .. tostring(err))
+            .. 'this version of the game). To try again: improved-water retry\n' .. tostring(err))
     end
 end
 
@@ -1708,6 +1714,8 @@ elseif cmd == 'timing' then
     module.timing_since = dfhack.getTickCount()
 elseif cmd == 'waves' then
     print((module.state.painter or module.wave_painter).live_status())
+elseif cmd == 'retry' then
+    module.state.failed = nil
 elseif cmd ~= 'stats' then
     print([[improved-water draws moving light on water and the ocean's waves and foam. It only draws.
   overlay enable improved-water.overlay    switch it on (it is on by default)
@@ -1715,6 +1723,7 @@ elseif cmd ~= 'stats' then
   improved-water waves     what the waves are doing now
   improved-water stats     the caustics' numbers and time per frame
   improved-water timing    the waves' time per part
-  improved-water reload    load the wave art again, and try again after an error]])
+  improved-water reload    load the wave art again (each reload keeps the old art in memory)
+  improved-water retry     draw again after it stopped on an error]])
     if module.state.failed then print('It has stopped drawing after an error; see the DFHack console.') end
 end

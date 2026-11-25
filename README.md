@@ -24,7 +24,7 @@ in classic (text) mode it draws nothing.
    or both draw.
 
 It works when water shows moving light lines. `improved-water` in the DFHack console lists the commands;
-`stats`, `timing` and `reload` are for development. If a file is missing, or the script meets an error (for
+`stats`, `timing` and `reload` are for development; `retry` makes it draw again after it stopped on an error. If a file is missing, or the script meets an error (for
 example after a game update), it says so once in the DFHack console in a line starting `improved-water:` and
 stops drawing; nothing else is affected.
 
@@ -155,10 +155,12 @@ commands that built them in that version of this file.
 Speed (measured in game on a beach view of 38x25 tiles, 30 frames a second): the script reads the game's flags
 whole and tests bits, reads each tile type's properties once, keeps the water, the wave pieces and the draw
 list as parallel arrays, and plans the waves again only when the flows, the terrain or the view changed.
+Wider views (same window zoomed out, in fog, 2026-11-24): at 75x50 tiles the game alone drew 17.9 frames a second
+and 15.1 with the overlay; at 150x100 tiles 4.8 and about 3.4. The cost grows with the water tiles in view.
 It was checked against the version at the tag `locked-art-features`: both loaded side by side in the running
 game, each drawing the same frame into the map's screen layers, compared cell by cell.
 
 If the script meets an error while drawing, it reports it once, draws nothing more and leaves the other DFHack
-overlays alone, until `improved-water reload` or a new load of the script.
+overlays alone, until `improved-water retry` or the next game start.
 
 Never call `dfhack.textures.deleteHandle` when reloading (it crashed the game); old textures are leaked instead.
