@@ -1325,11 +1325,15 @@ end
 -- rain alone put the game's puddles on 7.6% of a clear one (both measured).
 local FOG_LAYER = 'screentexpos_designation'
 
--- what this script last painted on top, per cell of the view
-local top_mine = {}
+-- What this script painted on top, per cell of the view: top_last in the frame before (what the layer's
+-- copy is compared with), top_mine in this one. Two tables, because a cell can get two pieces in one
+-- frame (a rim and foam on driftwood, a crest and a whitecap): both must be judged by last frame's result.
+-- They swap after each frame. Kept across a re-run of the script.
+top_mine = top_mine or {}
+top_last = top_last or {}
 
 function WavesOverlay:draw(port, screen_x, screen_y)
-    local under_fog, mine, last_top = port[FOG_LAYER], top_mine, port.screentexpos_interface_old
+    local under_fog, mine, last_mine, last_top = port[FOG_LAYER], top_mine, top_last, port.screentexpos_interface_old
     local floor_two = port.screentexpos_background_two
     local floor_one = port.screentexpos_background
     local floor_flag = port.screentexpos_floor_flag
@@ -1348,7 +1352,7 @@ function WavesOverlay:draw(port, screen_x, screen_y)
             if d_clears[i] then floor_flag[index] = 0 end
         else
             local theirs = index >= 0 and last_top[index] or 0
-            if theirs ~= 0 and theirs ~= mine[index] then
+            if theirs ~= 0 and theirs ~= last_mine[index] then
                 under_fog[index] = d_texpos[i]
             else
                 paint(TILE_PEN, screen_x + d_sx[i], screen_y + d_sy[i], ' ', d_texpos[i], true)
@@ -1447,8 +1451,9 @@ function WavesOverlay:onRenderFrame(dc, viewport)
         self.seen_incoming, self.seen_newest, self.seen_newest_at = incoming, newest, newest_at
         self.flows_stale, self.crests_stale = true, true
     end
-    -- A new view or a new water list from the caustics is planned for in this frame, without waiting for
-    -- the next scan (measured: after a pan of one tile a rim piece came 70 ms late).
+    -- A new view or a new water list from the caustics is planned for at once, without waiting for the
+    -- next scan (measured: after a pan of one tile a rim piece came 70 ms late). The rim along the sea
+    -- still follows the caustics' water list, which is made after this in the frame and kept for a while.
     local view_changed = state.view_id ~= self.scan_water or z ~= self.scan_z or x1 ~= self.scan_x1
         or y1 ~= self.scan_y1 or viewport.x2 ~= self.scan_x2 or viewport.y2 ~= self.scan_y2
         or (state.cache ~= nil and state.z == z) ~= self.plan_has_water
@@ -1507,12 +1512,12 @@ function WavesOverlay:onRenderFrame(dc, viewport)
         local paint = dfhack.screen.paintTile
         local c_sx, c_sy, c_texpos = self.crest_sx, self.crest_sy, self.crest_texpos
         local under_fog, view_dim_x, view_dim_y = port[FOG_LAYER], port.dim_x, port.dim_y
-        local last_top, mine = port.screentexpos_interface_old, top_mine
+        local last_top, mine, last_mine = port.screentexpos_interface_old, top_mine, top_last
         for i = 1, self.crest_count do
             local sx, sy = c_sx[i], c_sy[i]
             local index = sx >= 0 and sy >= 0 and sx < view_dim_x and sy < view_dim_y and sx * view_dim_y + sy or -1
             local theirs = index >= 0 and last_top[index] or 0
-            if theirs ~= 0 and theirs ~= mine[index] then
+            if theirs ~= 0 and theirs ~= last_mine[index] then
                 under_fog[index] = c_texpos[i]
             else
                 paint(TILE_PEN, screen_x + sx, screen_y + sy, ' ', c_texpos[i], true)
@@ -1521,6 +1526,7 @@ function WavesOverlay:onRenderFrame(dc, viewport)
         end
     end
     self:draw(port, screen_x, screen_y)
+    top_mine, top_last = top_last, top_mine
     timed_since('frame', now)
 end
 
