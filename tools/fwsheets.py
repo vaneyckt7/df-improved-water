@@ -278,6 +278,6 @@ if __name__ == '__main__':
     Image.fromarray(foam).save(os.path.join(out, 'seafoam.png'))
     Image.fromarray(crest).save(os.path.join(out, 'swell.png'))
     fringe = rockfringe()
-    Image.fromarray(fringe).save(os.path.join(out, 'riverfringe.png'))
+    Image.fromarray(fringe).save(os.path.join(out, 'rock_fringe.png'))
     if len(sys.argv) > 2:
         preview(foam, crest, sys.argv[2])

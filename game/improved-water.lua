@@ -604,9 +604,9 @@ local SHEET_NAMES = {'wash', 'rock_fringe', 'sea_fringe', 'sea_foam', 'swell'}
 -- sheet: then no waves are drawn (the caustics still are) and it is said once, until the next reload.
 local function load_sheets()
     local loaded = {
-        wash = load_tiles('riversheet.png'),
-        rock_fringe = load_tiles('riverfringe.png'),
-        sea_fringe = load_tiles('riverseafringe.png'),
+        wash = load_tiles('wash.png'),
+        rock_fringe = load_tiles('rock_fringe.png'),
+        sea_fringe = load_tiles('sea_fringe.png'),
         sea_foam = load_tiles('seafoam.png'),
         swell = load_tiles('swell.png'),
     }

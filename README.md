@@ -91,9 +91,10 @@ the sand on the first floor layer and the log lies in the water.
 `game/caustics_waves_art/` holds the wave art, installed as `dfhack-config/scripts/caustics_waves_art/`:
 
 - ours, built by `tools/fwsheets.py`: `seafoam.png` (foam on the beach and spray), `swell.png` (crests out at
-  sea) and `riverfringe.png` (rock and pebble tiles beside the water: the water laps a few px onto the rock,
+  sea) and `rock_fringe.png` (rock and pebble tiles beside the water: the water laps a few px onto the rock,
   with a foam rim)
-- the mod author's, recoloured with `tools/fwtint.py`: `riversheet.png`, `riverseafringe.png`
+- the mod author's, recoloured with `tools/fwtint.py`: `wash.png` (the mod's `riversheet.png`: the thin water running over the beach) and
+  `sea_fringe.png` (the mod's `riverseafringe.png`: the lip of wash on the sea tiles)
 
     python fwsheets.py ../game/caustics_waves_art preview.png
 
@@ -112,7 +113,7 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
   game's own floor for that stone (still there with `WAVES = false`).
 - The game puts almost no wave flows on bare stone floor (2 of 35 such tiles in one high-tide view), only
   spray, which the game itself draws as blue streaks. Those tiles stay rock with a rim, as islands in the wash.
-- The lip of wash on the sea tiles (`riverseafringe.png`) goes on the second floor layer, under the caustics,
+- The lip of wash on the sea tiles (`sea_fringe.png`) goes on the second floor layer, under the caustics,
   so the caustic lines cross it. (On the interface layer it covered them; `screentexpos_floor_flag` is a
   flag, not a picture slot: writing a picture there brought the game's frayed edge back.)
 - Shrubs and saplings under a wave: the wash goes on the first floor layer, like under driftwood, and the
@@ -122,9 +123,8 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
 - A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 
-`tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet`, `riverfringe`, `riverseafringe`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
-the mod's originals and writes into an output folder (the copies in `game/caustics_waves_art/` were made this way). It also writes a recoloured
-`riverfringe.png`: do not copy that one over ours. The
+`tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet.png` and `riverseafringe.png`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
+the mod's originals and writes into an output folder (the copies in `game/caustics_waves_art/` were made this way). It writes them under our names, `wash.png` and `sea_fringe.png`. The
 wash colour is repeated in `fwsheets.py` (`WASH`).
 
     python -I fwtint.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes
