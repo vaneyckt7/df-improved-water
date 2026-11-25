@@ -6,7 +6,7 @@ A DFHack overlay that makes the sea, rivers and ponds in graphics mode look aliv
 [*][b]Wet shores.[/b] Rock, pebbles, sand and grass beside the sea get a wet rim with a foam line.
 [*][b]Things in the surf.[/b] Boulders, driftwood, shrubs and saplings under a wave stand in the water.
 [*][b]Flowing rivers.[/b] Rivers and brooks look like they move. Light patterns on the water run along with the current, in the direction the game says the river flows.
-[*][b]Living ponds.[/b] Ponds and pools get slowly drifting light patterns, and ripple rings that widen and fade on the still water.
+[*][b]Ponds.[/b] Ponds and pools get slowly drifting light patterns, and ripple rings that widen and fade on the still water.
 [/list]
 
 [h2]Requirements[/h2]
