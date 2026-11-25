@@ -1,6 +1,6 @@
 --@module = true
 -- Caustics on water tiles, and the ocean's waves, wash, foam and spray (the WAVES part below).
--- Water plays 128 frames baked offline (caustics_still.bin). Still water and the sea play them in place;
+-- Water plays 128 frames baked offline (improved-water-caustics.bin). Still water and the sea play them in place;
 -- flowing water carries them along with the flow.
 local overlay = require('plugins.overlay')
 local guidm = require('gui.dwarfmode')
@@ -56,7 +56,7 @@ local DATA_DIR = dfhack.getDFPath() .. '/dfhack-config/scripts/'
 do
     local source = debug.getinfo(1, 'S').source
     local beside = source:sub(1, 1) == '@' and source:sub(2):match('^(.*[/\\])[^/\\]*$')
-    local f = beside and io.open(beside .. 'caustics_still.bin', 'rb')
+    local f = beside and io.open(beside .. 'improved-water-caustics.bin', 'rb')
     if f then
         f:close()
         DATA_DIR = beside
@@ -123,14 +123,14 @@ local WAVE_FOAM_BELOW = 20    -- wave density below which the wash has broken up
 -- The wave flows found by the waves' last scan (see the WAVES part), shared with the caustics' wash.
 local seen_waves = {n = 0, x = {}, y = {}, key = {}, density = {}}
 
--- Bake animation frame o (0-based) of one direction's loop from caustics_still.bin: STEPS frames of
+-- Bake animation frame o (0-based) of one direction's loop from improved-water-caustics.bin: STEPS frames of
 -- N x N bytes, 0 = unlit, 1-6 = level. Without that file there are no caustics.
 -- Old textures are never freed: deleteHandle crashed DF (access violation, 2026-11-18).
 local still_data
 local function load_still()
     if still_data == nil then
         still_data = false
-        local f = io.open(DATA_DIR .. 'caustics_still.bin', 'rb')
+        local f = io.open(DATA_DIR .. 'improved-water-caustics.bin', 'rb')
         if f then
             local s = f:read('a'); f:close()
             if #s == STEPS * N * N then still_data = s end
@@ -171,7 +171,7 @@ local function build_mix_frame(data, o, da, db)
     return dfhack.textures.createTileset(pix, N, N, TP, TP)
 end
 
--- Ring events (caustics_rings.bin, made offline from the same frames): byte EV, byte LIFE,
+-- Ring events (improved-water-ripples.bin, made offline from the same frames): byte EV, byte LIFE,
 -- EV x (tile position 0-15, start frame), then EV x LIFE x TP x TP level bytes. Each event is
 -- one tile position's still-water pixels over LIFE frames with a ring drawn on top, so a map
 -- tile can swap to it for the ring's life without a seam. Which tiles do so is decided per
@@ -180,7 +180,7 @@ local ring_data
 local function load_rings()
     if ring_data == nil then
         ring_data = false
-        local f = io.open(DATA_DIR .. 'caustics_rings.bin', 'rb')
+        local f = io.open(DATA_DIR .. 'improved-water-ripples.bin', 'rb')
         if f then
             local s = f:read('a'); f:close()
             local ev, life = s:byte(1, 2)
@@ -213,7 +213,7 @@ local function bake_ring()
     if not rd then
         state.rings = {done = true}
         if load_still() then
-            dfhack.printerr('improved-water: caustics_rings.bin is missing from ' .. DATA_DIR
+            dfhack.printerr('improved-water: improved-water-ripples.bin is missing from ' .. DATA_DIR
                 .. ' or the wrong size; no ripple rings are drawn')
         end
         return
@@ -250,7 +250,7 @@ local function bake_some(dir, budget)
     if not data then
         if not state.warned then
             state.warned = true
-            dfhack.printerr('improved-water: caustics_still.bin is missing from ' .. DATA_DIR .. ' or the wrong size; no caustics are drawn')
+            dfhack.printerr('improved-water: improved-water-caustics.bin is missing from ' .. DATA_DIR .. ' or the wrong size; no caustics are drawn')
         end
         return 0
     end
@@ -492,7 +492,7 @@ end
 --
 -- This part is the script of the Flowing Waves mod 1.3 by Poss (Steam Workshop 3829998283,
 -- scripts_modactive/flowing_waves.lua), copied in and changed here. Its art is in
--- dfhack-config/scripts/caustics_waves_art/. Keep that mod's own overlay (flowing_waves.waves) disabled,
+-- dfhack-config/scripts/improved-water-art/. Keep that mod's own overlay (flowing_waves.waves) disabled,
 -- or both draw.
 --
 -- The game simulates waves washing up beaches as OceanWave and SeaFoam flows. ASCII mode draws
@@ -563,7 +563,7 @@ local FLOW_DY = {-1, -1, 1, 1, -1, 1, 0, 0}
 -- Art
 ----------------------------------------------------------------------------------------------
 
-local art_dir = DATA_DIR .. 'caustics_waves_art/'
+local art_dir = DATA_DIR .. 'improved-water-art/'
 
 -- DFHack keeps every image it has loaded for the rest of the session, keyed by path, so loading
 -- the same path again gives the old picture. To pick up rebuilt art, `improved-water reload` loads

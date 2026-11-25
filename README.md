@@ -15,7 +15,7 @@ itself has (its waves, flows and water tiles) and changes nothing in the fort:
 Needs Dwarf Fortress 53.17 (Steam) with DFHack 53.17-r1; other versions are untested. Graphics mode only:
 in classic (text) mode it draws nothing.
 
-1. Copy everything in `game/` (the script, the two `.bin` files and the folder `caustics_waves_art/`) into
+1. Copy everything in `game/` (the script, the two `.bin` files and the folder `improved-water-art/`) into
    `<Dwarf Fortress>/dfhack-config/scripts/`. The script looks for its files beside itself, so they must stay
    together.
 2. Load a fort. The overlay is on by default; DFHack finds it at the next game start or fort load. (Typing
@@ -29,19 +29,19 @@ example after a game update), it says so once in the DFHack console in a line st
 stops drawing; nothing else is affected.
 
 To switch it off: `overlay disable improved-water.overlay`. To remove it: delete `improved-water.lua`,
-`caustics_still.bin`, `caustics_rings.bin` and the folder `caustics_waves_art/` from `dfhack-config/scripts/`.
+`improved-water-caustics.bin`, `improved-water-ripples.bin` and the folder `improved-water-art/` from `dfhack-config/scripts/`.
 The script only draws; it writes nothing to the fort or the save. (`improved-water reload` puts copies of the
-art in `caustics_waves_art/reloaded/`.)
+art in `improved-water-art/reloaded/`.)
 
 ## Files
 
 `game/` holds the files as installed in `<Dwarf Fortress>/dfhack-config/scripts/`:
 
 - `improved-water.lua` - the overlay script (DFHack overlay `improved-water.overlay`, command
-  `improved-water`). All water plays the baked caustic frames of `caustics_still.bin`; flowing water carries them along with the flow.
+  `improved-water`). All water plays the baked caustic frames of `improved-water-caustics.bin`; flowing water carries them along with the flow.
   Without that file no caustics are drawn.
-- `caustics_still.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint line, 2-3 bright, 4 very faint, 5 white, 6 shadow)
-- `caustics_rings.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
+- `improved-water-caustics.bin` - 128 frames of 128x128 level bytes (0 off, 1 faint line, 2-3 bright, 4 very faint, 5 white, 6 shadow)
+- `improved-water-ripples.bin` - 64 pre-composited ring clips (levels 7-12 = ring crest colours `RING_COLS`), generated from the still file (regenerate whenever it changes)
 
 Sea: salt water with no flow, on a map where the game has ocean waves (`world.event.ocean_waves`), shows the
 still-water caustics without rings.
@@ -88,7 +88,7 @@ foam band inside the water tile against sand: sand beside the wash gets the same
 unbroken from the wash to the sea. On driftwood the game's log sits on the layer the wash uses, so there the wash replaces
 the sand on the first floor layer and the log lies in the water.
 
-`game/caustics_waves_art/` holds the wave art, installed as `dfhack-config/scripts/caustics_waves_art/`:
+`game/improved-water-art/` holds the wave art, installed as `dfhack-config/scripts/improved-water-art/`:
 
 - ours, built by `tools/fwsheets.py`: `seafoam.png` (foam on the beach and spray), `swell.png` (crests out at
   sea) and `rock_fringe.png` (rock and pebble tiles beside the water: the water laps a few px onto the rock,
@@ -96,7 +96,7 @@ the sand on the first floor layer and the log lies in the water.
 - the mod author's, recoloured with `tools/fwtint.py`: `wash.png` (the mod's `riversheet.png`: the thin water running over the beach) and
   `sea_fringe.png` (the mod's `riverseafringe.png`: the lip of wash on the sea tiles)
 
-    python fwsheets.py ../game/caustics_waves_art preview.png
+    python fwsheets.py ../game/improved-water-art preview.png
 
 Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a wave is lit), `SEA_COLS` and
 `WASH_COLS` (the caustic colours on the sea and on the lighter wash) are in the script. Notes from testing in game:
@@ -124,7 +124,7 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 
 `tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet.png` and `riverseafringe.png`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
-the mod's originals and writes into an output folder (the copies in `game/caustics_waves_art/` were made this way). It writes them under our names, `wash.png` and `sea_fringe.png`. The
+the mod's originals and writes into an output folder (the copies in `game/improved-water-art/` were made this way). It writes them under our names, `wash.png` and `sea_fringe.png`. The
 wash colour is repeated in `fwsheets.py` (`WASH`).
 
     python -I fwtint.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes
@@ -143,8 +143,8 @@ for one. It loops in time but does not tile in space, so a 96 px band along two 
 the opposite edges before each frame is shrunk to 128x128 px. Levels by brightness: 4 very faint halo,
 1 line, 5 white knots. No shadow.
 
-    python fromgif.py <animation.gif> caustics_still.bin 96 72,82,96.5   # blend band px, halo/line/white percentiles
-    python ringgif.py <ripple.gif> caustics_still.bin caustics_rings.bin 4 7 28 0.72,0.54,0.40,0.28,0.17,0.08 0.5 0.6 7,8,9,10,11,12 1
+    python fromgif.py <animation.gif> improved-water-caustics.bin 96 72,82,96.5   # blend band px, halo/line/white percentiles
+    python ringgif.py <ripple.gif> improved-water-caustics.bin improved-water-ripples.bin 4 7 28 0.72,0.54,0.40,0.28,0.17,0.08 0.5 0.6 7,8,9,10,11,12 1
     python ringcols.py ../game/improved-water.lua 0.26
 
 Current rings: shape taken from a 128-frame animation of one widening ripple (not in this repo; the build
