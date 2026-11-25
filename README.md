@@ -12,16 +12,26 @@ itself has (its waves, flows and water tiles) and changes nothing in the fort:
 
 ## Install
 
-Needs Dwarf Fortress 53.17 (Steam, graphics mode) with DFHack 53.17-r1; other versions are untested.
+Needs Dwarf Fortress 53.17 (Steam) with DFHack 53.17-r1; other versions are untested. Graphics mode only:
+in classic (text) mode it draws nothing.
 
 1. Copy everything in `game/` (the script, the two `.bin` files and the folder `caustics_waves_art/`) into
-   `<Dwarf Fortress>/dfhack-config/scripts/`.
-2. In the DFHack console: `overlay enable improved-water.overlay`. DFHack remembers this for the next start.
+   `<Dwarf Fortress>/dfhack-config/scripts/`. The script looks for its files beside itself, so they must stay
+   together.
+2. Load a fort. The overlay is on by default; DFHack finds it at the next game start or fort load. (Typing
+   `overlay enable improved-water.overlay` before that answers "widget not found".)
 3. If the Flowing Waves mod is installed, switch its own overlay off (`overlay disable flowing_waves.waves`),
    or both draw.
 
-To switch it off: `overlay disable improved-water.overlay`. The script only draws; it writes nothing to the
-fort or the save.
+It works when water shows moving light lines. `improved-water` in the DFHack console lists the commands;
+`stats`, `timing` and `reload` are for development. If a file is missing, or the script meets an error (for
+example after a game update), it says so once in the DFHack console in a line starting `improved-water:` and
+stops drawing; nothing else is affected.
+
+To switch it off: `overlay disable improved-water.overlay`. To remove it: delete `improved-water.lua`,
+`caustics_still.bin`, `caustics_rings.bin` and the folder `caustics_waves_art/` from `dfhack-config/scripts/`.
+The script only draws; it writes nothing to the fort or the save. (`improved-water reload` puts copies of the
+art in `caustics_waves_art/reloaded/`.)
 
 ## Files
 
@@ -59,7 +69,9 @@ Fog: in fog the game paints its haze over the interface layer of the whole view 
 which would wipe the foam rims, foam, spray and crests. When at least 90% of the view was hazed in the last
 frame, those pieces go to `screentexpos_designation` instead and show through the haze. A view that is partly
 indoors may stay under that limit; then the top pieces are hidden by the haze. A DFHack tool that fills the
-interface layer of the whole view (`gui/pathable`) counts as fog in the same way.
+interface layer of the whole view (`gui/pathable`) counts as fog in the same way. Checked in real fog
+(2026-11-24): all top pieces went under the haze. The game itself leaves single tiles clear of haze; those
+squares are there with the overlay off too.
 
 Added to the mod's logic: all natural ground that touches the open sea (rock, pebbles, sand, soil, grass,
 boulders; not built floors) gets the rock rim, not only rock beside the wash. The game's own frayed sand
@@ -140,12 +152,13 @@ Earlier still water and rings (drawn circles, a wobbling single picture, generat
 webs, a simulated wave surface) are in the history up to the tag `locked-art-features`, with their tools and the
 commands that built them in that version of this file.
 
-`apply_still.sh` and `bg.py` install into a running game over DFHack RPC (paths are machine-specific).
-
 Speed (measured in game on a beach view of 38x25 tiles, 30 frames a second): the script reads the game's flags
 whole and tests bits, reads each tile type's properties once, keeps the water, the wave pieces and the draw
 list as parallel arrays, and plans the waves again only when the flows, the terrain or the view changed.
 It was checked against the version at the tag `locked-art-features`: both loaded side by side in the running
 game, each drawing the same frame into the map's screen layers, compared cell by cell.
+
+If the script meets an error while drawing, it reports it once, draws nothing more and leaves the other DFHack
+overlays alone, until `improved-water reload` or a new load of the script.
 
 Never call `dfhack.textures.deleteHandle` when reloading (it crashed the game); old textures are leaked instead.

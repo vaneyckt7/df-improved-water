@@ -49,6 +49,20 @@ WASH_COLS = {0x91FFFF40, 0x9EFFFF50, 0xADFFFFA0, 0x85FFFF40, 0xB8FFFF70}   -- li
 -- WAVES: also draw the ocean's waves, wash, foam and spray (see the WAVES part below). false = caustics only.
 WAVES = true
 state = state or {}
+state.failed = nil   -- loading the script again gives it a fresh try (see CausticsOverlay:onRenderFrame)
+
+-- The data files and the art folder lie beside this script, wherever it was installed. If they are not
+-- there, the place they were always copied to (dfhack-config/scripts) is tried.
+local DATA_DIR = dfhack.getDFPath() .. '/dfhack-config/scripts/'
+do
+    local source = debug.getinfo(1, 'S').source
+    local beside = source:sub(1, 1) == '@' and source:sub(2):match('^(.*[/\\])[^/\\]*$')
+    local f = beside and io.open(beside .. 'caustics_still.bin', 'rb')
+    if f then
+        f:close()
+        DATA_DIR = beside
+    end
+end
 state.sets = state.sets or {}            -- frame sets keyed by flow direction
 state.stats = state.stats or {n=0, us=0}
 state.clock = state.clock or dfhack.getTickCount()   -- ms of animation time
@@ -117,7 +131,7 @@ local still_data
 local function load_still()
     if still_data == nil then
         still_data = false
-        local f = io.open(dfhack.getDFPath() .. '/dfhack-config/scripts/caustics_still.bin', 'rb')
+        local f = io.open(DATA_DIR .. 'caustics_still.bin', 'rb')
         if f then
             local s = f:read('a'); f:close()
             if #s == STEPS * N * N then still_data = s end
@@ -167,7 +181,7 @@ local ring_data
 local function load_rings()
     if ring_data == nil then
         ring_data = false
-        local f = io.open(dfhack.getDFPath() .. '/dfhack-config/scripts/caustics_rings.bin', 'rb')
+        local f = io.open(DATA_DIR .. 'caustics_rings.bin', 'rb')
         if f then
             local s = f:read('a'); f:close()
             local ev, life = s:byte(1, 2)
@@ -230,7 +244,7 @@ local function bake_some(dir, budget)
     if not data then
         if not state.warned then
             state.warned = true
-            dfhack.printerr('caustics: caustics_still.bin is missing or the wrong size; no caustics drawn')
+            dfhack.printerr('improved-water: caustics_still.bin is missing from ' .. DATA_DIR .. ' or the wrong size; no caustics are drawn')
         end
         return 0
     end
@@ -543,7 +557,7 @@ local FLOW_DY = {-1, -1, 1, 1, -1, 1, 0, 0}
 -- Art
 ----------------------------------------------------------------------------------------------
 
-local art_dir = dfhack.getDFPath() .. '/dfhack-config/scripts/caustics_waves_art/'
+local art_dir = DATA_DIR .. 'caustics_waves_art/'
 
 -- DFHack keeps every image it has loaded for the rest of the session, keyed by path, so loading
 -- the same path again gives the old picture. To pick up rebuilt art, `improved-water reload` loads
@@ -1534,8 +1548,22 @@ function CausticsOverlay:overlay_onupdate() end
 local ring_at, ring_k, ring_tile = {}, {}, {}
 local ring_kept = {n = 0}
 
+local draw_frame
+
+-- An error in here would come back every frame and would also stop the DFHack overlays drawn after this
+-- one (a later version of the game renaming something this script reads would do it). So the first error
+-- is reported once and the script then draws nothing until it is loaded again.
 function CausticsOverlay:onRenderFrame(dc)
-    if not dfhack.isMapLoaded() then return end
+    if state.failed or not dfhack.isMapLoaded() or not dfhack.screen.inGraphicsMode() then return end
+    local ok, err = xpcall(draw_frame, debug.traceback, self, dc)
+    if not ok then
+        state.failed = true
+        dfhack.printerr('improved-water: stopped drawing after an error (this version of the script may not match '
+            .. 'this version of the game). To try again: improved-water reload\n' .. tostring(err))
+    end
+end
+
+function draw_frame(self, dc)
     local vp = guidm.Viewport.get()
     state.painter = painter
     if WAVES then painter:onRenderFrame(dc, vp) end
@@ -1668,6 +1696,7 @@ local module = reqscript('improved-water')
 if cmd == 'reload' then
     module.reload_count = module.reload_count + 1
     module.sheets = nil
+    module.state.failed = nil
 elseif cmd == 'timing' then
     local seconds = math.max(1, dfhack.getTickCount() - module.timing_since) / 1000
     print(('improved-water waves: over the last %.1f s'):format(seconds))
@@ -1679,4 +1708,13 @@ elseif cmd == 'timing' then
     module.timing_since = dfhack.getTickCount()
 elseif cmd == 'waves' then
     print((module.state.painter or module.wave_painter).live_status())
+elseif cmd ~= 'stats' then
+    print([[improved-water draws moving light on water and the ocean's waves and foam. It only draws.
+  overlay enable improved-water.overlay    switch it on (it is on by default)
+  overlay disable improved-water.overlay   switch it off
+  improved-water waves     what the waves are doing now
+  improved-water stats     the caustics' numbers and time per frame
+  improved-water timing    the waves' time per part
+  improved-water reload    load the wave art again, and try again after an error]])
+    if module.state.failed then print('It has stopped drawing after an error; see the DFHack console.') end
 end
