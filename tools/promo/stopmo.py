@@ -9,7 +9,7 @@ print(bg.lua(f'df.global.pause_state=true df.global.window_x={x} df.global.windo
 base=int(float(bg.lua('print(reqscript("improved-water").state.clock)').split()[-1]))
 def grab(p):
     subprocess.run(['caffeinate','-u','-t','1'])
-    subprocess.run(['screencapture','-x','-o','-l','38199',p],check=True)
+    subprocess.run(['screencapture','-x','-o','-l','38307',p],check=True)
 for i in range(N):
     bg.lua(f'df.global.pause_state=false dfhack.timeout({K},"ticks",function() df.global.pause_state=true end)')
     for t in range(40):
