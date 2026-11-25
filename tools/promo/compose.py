@@ -26,6 +26,8 @@ def frame(a,b,pos,labels=('Before','After'),label_size=18):
         d.rectangle((x-1,0,x+1,h),fill=(245,245,245))
         d.rectangle((x-2,0,x-2,h),fill=(20,20,20)); d.rectangle((x+2,0,x+2,h),fill=(20,20,20))
         pill(d,labels[0],12,h-12,'l',label_size); pill(d,labels[1],w-12,h-12,'r',label_size)
+        title=os.environ.get('TITLE')
+        if title: pill(d,title,12,12+int(label_size*1.25)+22,'l',int(label_size*1.25))
     return out
 def main():
     seq,outp,mode,ox,oy=sys.argv[1],sys.argv[2],sys.argv[3],int(sys.argv[4]),int(sys.argv[5])
