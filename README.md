@@ -10,6 +10,21 @@ itself has (its waves, flows and water tiles) and changes nothing in the fort:
 - light patterns (caustics) move over all water, and run along with the flow in rivers
 - ripple rings widen on still fresh water
 
+## Install
+
+Needs Dwarf Fortress 53.17 (Steam, graphics mode) with DFHack 53.17-r1; other versions are untested.
+
+1. Copy everything in `game/` (the script, the two `.bin` files and the folder `caustics_waves_art/`) into
+   `<Dwarf Fortress>/dfhack-config/scripts/`.
+2. In the DFHack console: `overlay enable improved-water.overlay`. DFHack remembers this for the next start.
+3. If the Flowing Waves mod is installed, switch its own overlay off (`overlay disable flowing_waves.waves`),
+   or both draw.
+
+To switch it off: `overlay disable improved-water.overlay`. The script only draws; it writes nothing to the
+fort or the save.
+
+## Files
+
 `game/` holds the files as installed in `<Dwarf Fortress>/dfhack-config/scripts/`:
 
 - `improved-water.lua` - the overlay script (DFHack overlay `improved-water.overlay`, command
@@ -39,6 +54,12 @@ before publishing this anywhere. With it in our script, keep the mod's own overl
 Layers: the caustics are written to the map viewport layer `screentexpos_signpost` (`UNDER_LAYER`). The waves use the layers the mod used: `screentexpos_background`
 (water under boulders), `screentexpos_background_two` (wash and foam, where that slot is free) and the
 interface layer (everything else), so waves and foam show over the caustics.
+
+Fog: in fog the game paints its haze over the interface layer of the whole view after the overlay has drawn,
+which would wipe the foam rims, foam, spray and crests. When at least 90% of the view was hazed in the last
+frame, those pieces go to `screentexpos_designation` instead and show through the haze. A view that is partly
+indoors may stay under that limit; then the top pieces are hidden by the haze. A DFHack tool that fills the
+interface layer of the whole view (`gui/pathable`) counts as fog in the same way.
 
 Added to the mod's logic: all natural ground that touches the open sea (rock, pebbles, sand, soil, grass,
 boulders; not built floors) gets the rock rim, not only rock beside the wash. The game's own frayed sand
