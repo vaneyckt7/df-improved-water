@@ -566,7 +566,7 @@ local art_dir = DATA_DIR .. 'improved-water-art/'
 
 -- DFHack keeps every image it has loaded for the rest of the session, keyed by path, so loading
 -- the same path again gives the old picture. To pick up rebuilt art, `improved-water reload` loads
--- fresh copies from art/reloaded/ under new names.
+-- fresh copies from improved-water-art/reloaded/ under new names.
 reload_count = reload_count or 0
 
 local function copy_file(from, to)
@@ -606,7 +606,7 @@ local function load_sheets()
         wash = load_tiles('wash.png'),
         rock_fringe = load_tiles('rock_fringe.png'),
         sea_fringe = load_tiles('sea_fringe.png'),
-        sea_foam = load_tiles('seafoam.png'),
+        sea_foam = load_tiles('sea_foam.png'),
         swell = load_tiles('swell.png'),
     }
     for _, name in ipairs(SHEET_NAMES) do

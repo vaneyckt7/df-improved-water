@@ -1,8 +1,8 @@
-"""Foam and crest sheets for the Flowing Waves mod (art/seafoam.png, art/swell.png), in its layout.
+"""Builds our own art sheets (sea_foam.png, swell.png, rock_fringe.png), in the Flowing Waves mod's layout.
 
-    python fwsheets.py <out dir> [preview.png]
+    python make_art_sheets.py <out dir> [preview.png]
 
-seafoam.png: 16 frames across; row = (stage * 16 + joined_sides) * 4 + variant, stage 0 (nearly gone) .. 7
+sea_foam.png: 16 frames across; row = (stage * 16 + joined_sides) * 4 + variant, stage 0 (nearly gone) .. 7
 (fresh), joined_sides bits N=1 E=2 S=4 W=8 (that neighbour has foam or a wave too), variant by tile position.
 swell.png: 16 frames across; row = heading * 4 + whiteness, heading north, south, east, west (the way the
 crest travels), whiteness 0 (far out) .. 3 (about to break). A tile shows frame (step + shift) % 16 and
@@ -275,7 +275,7 @@ if __name__ == '__main__':
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
     foam, crest = seafoam(), swell()
-    Image.fromarray(foam).save(os.path.join(out, 'seafoam.png'))
+    Image.fromarray(foam).save(os.path.join(out, 'sea_foam.png'))
     Image.fromarray(crest).save(os.path.join(out, 'swell.png'))
     fringe = rockfringe()
     Image.fromarray(fringe).save(os.path.join(out, 'rock_fringe.png'))

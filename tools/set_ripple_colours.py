@@ -1,4 +1,4 @@
-# usage: ringcols.py <improved-water.lua> <strength 0-1>   - rewrite RING_COLS: the ripple animation's lightening times
+# usage: set_ripple_colours.py <improved-water.lua> <strength 0-1>   - rewrite RING_COLS: the ripple animation's lightening times
 # <strength>, brighter steps pulled up to 40% toward the water's teal hue, solved for out = c*a^2 + water*(1-a).
 import sys, re, numpy as np
 W=np.array([1,78,90.]); D=np.array([100,84,58.]); ts=[1.0,0.8,0.62,0.46,0.32,0.2]; S=float(sys.argv[2])

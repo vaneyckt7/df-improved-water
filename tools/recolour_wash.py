@@ -1,14 +1,14 @@
 """Recolours the Flowing Waves mod's wash sheets and/or makes them more see-through: shallow water on the
 beach should look lighter than the open sea, not darker.
 
-    python -I fwtint.py <mod art_original dir> <mod art dir> [r,g,b | -] [opacity factor]
+    python -I recolour_wash.py <mod art_original dir> <mod art dir> [r,g,b | -] [opacity factor]
 
 "-" keeps the colours; the opacity factor (default 1) multiplies every pixel's opacity.
 
 Reads the mod's own riversheet.png and riverseafringe.png from the first folder (a copy of the originals)
 and writes recoloured ones into the second under this repo's names, wash.png (cut down to the one row the
 script draws) and sea_fringe.png. (The mod's
-riverfringe.png is not used: rock_fringe.png is built by fwsheets.py.) Each colour channel is scaled
+riverfringe.png is not used: rock_fringe.png is built by make_art_sheets.py.) Each colour channel is scaled
 toward white so that the sheets' base water colour BASE becomes the target colour.
 The results are derived from the mod author's art, so they are not kept in this repo.
 """

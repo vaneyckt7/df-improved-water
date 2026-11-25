@@ -90,13 +90,13 @@ the sand on the first floor layer and the log lies in the water.
 
 `game/improved-water-art/` holds the wave art, installed as `dfhack-config/scripts/improved-water-art/`:
 
-- ours, built by `tools/fwsheets.py`: `seafoam.png` (foam on the beach and spray), `swell.png` (crests out at
+- ours, built by `tools/make_art_sheets.py`: `sea_foam.png` (foam on the beach and spray), `swell.png` (crests out at
   sea) and `rock_fringe.png` (rock and pebble tiles beside the water: the water laps a few px onto the rock,
   with a foam rim)
-- the mod author's, recoloured with `tools/fwtint.py`: `wash.png` (one row of the mod's `riversheet.png`: the thin water running over the beach; the script draws every wash tile as open water on all sides, which is one picture in the mod's 256 rows) and
+- the mod author's, recoloured with `tools/recolour_wash.py`: `wash.png` (one row of the mod's `riversheet.png`: the thin water running over the beach; the script draws every wash tile as open water on all sides, which is one picture in the mod's 256 rows) and
   `sea_fringe.png` (the mod's `riverseafringe.png`: the lip of wash on the sea tiles)
 
-    python fwsheets.py ../game/improved-water-art preview.png
+    python make_art_sheets.py ../game/improved-water-art preview.png
 
 Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a wave is lit), `SEA_COLS` and
 `WASH_COLS` (the caustic colours on the sea and on the lighter wash) are in the script. Notes from testing in game:
@@ -123,13 +123,13 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
 - A see-through or dithered pale pixel came out darker than the sand under it in game, so the foam is fully
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 
-`tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet.png` and `riverseafringe.png`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
+`tools/recolour_wash.py` lightens the water of the mod's wash sheets (`riversheet.png` and `riverseafringe.png`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
 the mod's originals and writes into an output folder (the copies in `game/improved-water-art/` were made this way). It writes them under our names, `wash.png` (only the one row the script draws) and `sea_fringe.png`. The
-wash colour is repeated in `fwsheets.py` (`WASH`).
+wash colour is repeated in `make_art_sheets.py` (`WASH`).
 
-    python -I fwtint.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes
-    python -I fwtint.py <mod>/art_original <mod>/art - 0.7        # keep the colours, 70% of the opacity
-    python -I fwtint.py <mod>/art_original <mod>/art 20,114,127 1.2   # chosen: lighter than the sea, opaque
+    python -I recolour_wash.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes
+    python -I recolour_wash.py <mod>/art_original <mod>/art - 0.7        # keep the colours, 70% of the opacity
+    python -I recolour_wash.py <mod>/art_original <mod>/art 20,114,127 1.2   # chosen: lighter than the sea, opaque
 
 Measured in game: a see-through pixel shows as colour x opacity x opacity over the ground (at 70% opacity
 the uncorrected teal wash turned mud brown), so the tool divides the colour by the opacity. With that
@@ -143,18 +143,18 @@ for one. It loops in time but does not tile in space, so a 96 px band along two 
 the opposite edges before each frame is shrunk to 128x128 px. Levels by brightness: 4 very faint halo,
 1 line, 5 white knots. No shadow.
 
-    python fromgif.py <animation.gif> improved-water-caustics.bin 96 72,82,96.5   # blend band px, halo/line/white percentiles
-    python ringgif.py <ripple.gif> improved-water-caustics.bin improved-water-ripples.bin 4 7 28 0.72,0.54,0.40,0.28,0.17,0.08 0.5 0.6 7,8,9,10,11,12 1
-    python ringcols.py ../game/improved-water.lua 0.26
+    python make_caustics.py <animation.gif> improved-water-caustics.bin 96 72,82,96.5   # blend band px, halo/line/white percentiles
+    python make_ripples.py <ripple.gif> improved-water-caustics.bin improved-water-ripples.bin 4 7 28 0.72,0.54,0.40,0.28,0.17,0.08 0.5 0.6 7,8,9,10,11,12 1
+    python set_ripple_colours.py ../game/improved-water.lua 0.26
 
 Current rings: shape taken from a 128-frame animation of one widening ripple (not in this repo; the build
-used `~/Downloads/blue_bubble_ripple_128_frames.gif`, 768x768). `ringgif.py` reads its brightness profile
+used `~/Downloads/blue_bubble_ripple_128_frames.gif`, 768x768). `make_ripples.py` reads its brightness profile
 along the radius per frame and redraws it at tile size in six crest levels (7-12), 28 frames long, faint for
 the first two frames, with a faint trough (level 6) for the first 60%. The last argument `1` keeps the
-caustic lines on top of the ring. `ringcols.py` writes the six crest colours into the script: the
+caustic lines on top of the ring. `set_ripple_colours.py` writes the six crest colours into the script: the
 animation's lightening (crest minus its background) times a strength (0.26 chosen by eye in game), the
 brighter steps pulled up to 40% toward the water's teal hue, solved for the overlay blend on in-game water
-of about RGB 1,78,90. `ringstrip.py` draws a mock-up strip of one ring over its life.
+of about RGB 1,78,90. `preview_ripples.py` draws a mock-up strip of one ring over its life.
 
 Earlier still water and rings (drawn circles, a wobbling single picture, generated pebble nets, sliding Voronoi
 webs, a simulated wave surface) are in the history up to the tag `locked-art-features`, with their tools and the

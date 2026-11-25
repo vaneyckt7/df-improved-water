@@ -1,4 +1,4 @@
-# usage: fromgif.py <animation.gif> <out.bin> <blend band px> <pct vfaint,faint,white>
+# usage: make_caustics.py <animation.gif> <out.bin> <blend band px> <pct vfaint,faint,white>
 # Still-water frames from a 128-frame looping grayscale caustics animation. The animation loops in time but
 # does not tile in space, so a band along the right and bottom edges is cross-faded into the opposite edge
 # (variance-preserving) before each frame is shrunk to 128x128. Levels: 4 very faint halo, 1 line, 5 white.

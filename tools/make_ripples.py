@@ -1,9 +1,9 @@
-# usage: ringgif.py <ripple.gif> <still.bin> <out rings.bin> [slots] [seed] [life frames] [light thresholds a,b,c,d] [shadow threshold] [shadow ends at this fraction of the life] [levels for the 4 light bands, default 3,2,1,4]
+# usage: make_ripples.py <ripple.gif> <still.bin> <out rings.bin> [slots] [seed] [life frames] [light thresholds a,b,c,d] [shadow threshold] [shadow ends at this fraction of the life] [levels for the 4 light bands, default 3,2,1,4]
 # Ring clips taken from an animation of ONE ripple on a flat grey background (centred, radially symmetric).
 # Each animation frame is reduced to a profile "lighter/darker than the background by distance from the
 # centre"; a clip redraws that profile at a random centre and size inside a 32 px tile. Lighter parts become
 # levels 3/2/1/4 (fractions of the brightest crest), darker parts the shadow level 6.
-# Same file layout as rings2.py: byte EV, byte LIFE, EV x (position, start frame), EV x LIFE x 32x32 levels.
+# File layout: byte EV, byte LIFE, EV x (position, start frame), EV x LIFE x 32x32 levels.
 import sys, numpy as np
 from PIL import Image
 T, N, TP, SS = 128, 128, 32, 4
