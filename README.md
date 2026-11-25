@@ -61,8 +61,8 @@ found there: the generated river pattern (`caustics_fields.bin`), the old foam a
 
 The script also draws the ocean's waves (`WAVES = true` in the script; `false` = caustics only): the wash on
 the beach, foam, crests out at sea and spray. That part is the script of the Flowing Waves mod 1.3 by Poss
-(Steam Workshop 3829998283), copied into `improved-water.lua` and changed. It is the mod author's work, used with
-their permission (see Credits). With it in our script, keep the mod's own overlay off
+(Steam Workshop 3829998283), copied into `improved-water.lua` and changed. It is the mod author's work,
+credited here (see Credits). With it in our script, keep the mod's own overlay off
 (`overlay disable flowing_waves.waves`), or both draw. Commands: `improved-water stats`, `improved-water waves` (status),
 `improved-water reload` (reload the wave art), `improved-water timing`.
 
@@ -199,4 +199,4 @@ The ocean waves are built on the Flowing Waves mod 1.3 by Poss
 - `improved-water-art/wash.png` and `improved-water-art/sea_fringe.png` are that mod's art (`riversheet.png` and
   `riverseafringe.png`), recoloured
 
-Both remain Poss's work and are used with permission. The Flowing Waves mod does not need to be installed for this script to run.
+Both remain Poss's work. The Flowing Waves mod does not need to be installed for this script to run.
