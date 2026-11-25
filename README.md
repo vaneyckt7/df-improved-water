@@ -15,6 +15,16 @@ itself has (its waves, flows and water tiles) and changes nothing in the fort:
 Needs Dwarf Fortress 53.17 (Steam) with DFHack 53.17-r1; other versions are untested. Graphics mode only:
 in classic (text) mode it draws nothing.
 
+**As a mod (the way the Steam Workshop version installs):** `python tools/build_mod.py` assembles
+`dist/improved_water/` with `info.txt`, `preview.png` and `scripts_modinstalled/` holding everything in `game/`.
+Copy that folder into the game's user `mods/` folder (on Windows
+`%APPDATA%\Bay 12 Games\Dwarf Fortress\mods\`); a Workshop subscription puts it in place by itself. DFHack
+adds `scripts_modinstalled/` of every installed mod to its script path when a world loads, so the overlay
+works in existing forts and the mod does not have to be added to a world. To publish, upload that folder from
+the game's Mods screen; `steam/workshop_description.txt` is the text for the Workshop page.
+
+**By hand:**
+
 1. Copy everything in `game/` (the script, the two `.bin` files and the folder `improved-water-art/`) into
    `<Dwarf Fortress>/dfhack-config/scripts/`. The script looks for its files beside itself, so they must stay
    together.
@@ -29,7 +39,8 @@ example after a game update), it says so once in the DFHack console in a line st
 stops drawing; nothing else is affected.
 
 To switch it off: `overlay disable improved-water.overlay`. To remove it: delete `improved-water.lua`,
-`improved-water-caustics.bin`, `improved-water-ripples.bin` and the folder `improved-water-art/` from `dfhack-config/scripts/`.
+`improved-water-caustics.bin`, `improved-water-ripples.bin` and the folder `improved-water-art/` from `dfhack-config/scripts/`
+(or unsubscribe, or delete the mod folder). A copy in `dfhack-config/scripts/` is found before the mod's.
 The script only draws; it writes nothing to the fort or the save. (`improved-water reload` puts copies of the
 art in `improved-water-art/reloaded/`.)
 
