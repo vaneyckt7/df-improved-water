@@ -147,7 +147,11 @@ the uncorrected teal wash turned mud brown), so the tool divides the colour by t
 correction, 70% teal over red sand comes out grey.
 
 `tools/` rebuilds the still-water files and the wave art sheets, and packs the sheets (Python with numpy,
-scipy, Pillow; `pack_sheets.py` needs Pillow only).
+scipy, Pillow; `pack_sheets.py` needs Pillow only). Use a virtual environment (`python3 -m venv env; env/bin/pip install numpy scipy pillow`):
+`python -I`, used below for the tool that reads the mod's files, does not see packages installed for the
+user only. Checked 2026-11-25 with numpy 2.5.5, scipy 1.18.1 and Pillow 13.0.0: every tool, run as written
+here, gives the committed files again (byte for byte, except `wash.png`, which has the same pixels in a
+differently compressed file).
 
 Current still water: taken from a 128-frame looping grayscale caustics animation (not in this repo; the
 bake used `~/Downloads/water_caustics_128_frames.gif`, 768x768, 80 ms per frame). Its frames are used one
