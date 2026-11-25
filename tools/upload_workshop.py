@@ -22,6 +22,7 @@ import time
 
 APP = 975370
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+API_PICTURE_LIMIT = 1000000  # measured 2026-11-25: 0.8 MB accepted, 1.5 MB refused (result 25)
 VISIBILITY = {'public': 0, 'friends': 1, 'private': 2}
 
 
@@ -109,6 +110,13 @@ def main():
     preview = os.path.join(folder, 'preview.png')
     if not os.path.isfile(preview) or not os.path.isdir(os.path.join(folder, 'scripts_modinstalled')):
         sys.exit('%s is not a built mod folder' % folder)
+    main_picture = os.path.join(ROOT, 'steam', 'preview.png')
+    if not text_only and not images_only and open(preview, 'rb').read() != open(main_picture, 'rb').read():
+        sys.exit('%s differs from steam/preview.png: rebuild the mod folder first (tools/build_mod.py)' % preview)
+    too_big = [path for path in gallery + ([main_picture] if images_only else []) if os.path.getsize(path) > API_PICTURE_LIMIT]
+    if too_big:
+        sys.exit('Steam refuses pictures above about 1 MB through this route (use the Workshop page instead): '
+                 + ', '.join(os.path.basename(path) for path in too_big))
 
     os.environ['SteamAppId'] = os.environ['SteamGameId'] = str(APP)
     api = ctypes.CDLL(library)
@@ -161,9 +169,8 @@ def main():
         array = StringArray(strings, len(tags))
         steps = []
         if images_only:
-            main_picture = os.path.join(ROOT, 'steam', 'preview.png')
             steps.append(('preview', api.SteamAPI_ISteamUGC_SetItemPreview(ugc, update, main_picture.encode())))
-            for index in range(remove):
+            for index in reversed(range(remove)):  # highest first: right whether or not indices shift
                 steps.append(('remove picture %d' % index, api.SteamAPI_ISteamUGC_RemoveItemPreview(ugc, update, index)))
             for path in gallery:
                 steps.append((os.path.basename(path), api.SteamAPI_ISteamUGC_AddItemPreviewFile(ugc, update, path.encode(), 0)))
