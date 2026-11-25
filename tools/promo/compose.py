@@ -34,6 +34,8 @@ def main():
     w=int(sys.argv[6]) if len(sys.argv)>6 else 640; h=int(sys.argv[7]) if len(sys.argv)>7 else 360
     A=sorted(glob.glob(f'{SP}/shots/{seq}/a*.png')); B=sorted(glob.glob(f'{SP}/shots/{seq}/b*.png'))
     st=int(os.environ.get('START','0')); step=int(os.environ.get('STEP','1'))
+    xf=int(os.environ.get('XFADE','0'))  # blend the last xf frames into the ones just before START: no jump at the loop point
+    preA=A[st-xf*step:st:step]; preB=B[st-xf*step:st:step]
     A=A[st::step]; B=B[st::step]
     n=min(len(A),len(B),int(os.environ.get('FRAMES','9999'))); frames=[]
     for i in range(n):
@@ -42,6 +44,11 @@ def main():
         b=load(B[i],ox,oy,w,h)
         pos=0.5 if mode=='split' else 0.5-0.36*math.cos(2*math.pi*i/n)
         frames.append(frame(a,b,pos))
+    if xf and mode=='split':
+        assert len(preA)==xf, 'START must be at least XFADE*STEP'
+        for i in range(xf):
+            pre=frame(load(preA[i],ox,oy,w,h),load(preB[i],ox,oy,w,h),0.5)
+            frames[n-xf+i]=Image.blend(frames[n-xf+i],pre,(i+1)/(xf+1))
     if outp.endswith('.png'): frames[n//2].save(outp); return
     thr=int(os.environ.get('THR','0'))
     if thr:  # keep a pixel unchanged when it differs from the shown one by less than thr (summed RGB): smaller file
