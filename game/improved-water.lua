@@ -844,19 +844,19 @@ local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 -- one number per flow found (what it is, where, its stage), to tell whether anything has changed
 local found, found_count = {}, 0
 
--- dfhack.maps.readFlows reads a block's flows in one call into the game (measured: a scan in about a
--- third of the time, the densities alone in a fifth). It is not in every DFHack: without it, or with
--- one that answers differently from the one this was written for, the flows are read one field at a
--- time. Each way has its own scan and its own check below; both list the same flows in the same order.
-local READ_SCAN = {include_dead = true, fields = {'type', 'density', 'x', 'y'}}
-local READ_DENSITY = {include_dead = true, fields = {'density'}}
+-- df.readFields reads chosen fields of everything in a game list in one call into the game (measured:
+-- a scan in about a quarter of the time, the densities alone in a quarter). It is not in every DFHack:
+-- without it, or with one that answers differently from the one this was written for, the flows are
+-- read one field at a time. Each way has its own scan and its own check below; both list the same
+-- flows in the same order.
+local READ_SCAN = {fields = {'type', 'density', 'pos.x', 'pos.y'}}
+local READ_DENSITY = {fields = {'density'}}
 local flows_read = {}
-local readFlows = dfhack.maps.readFlows
-if readFlows then
-    local ok, read = pcall(readFlows, 0, 0, 0, 0, 0, 0, READ_DENSITY, {})
-    if not (ok and type(read) == 'table' and type(read.n) == 'number' and type(read.density) == 'table'
-            and read.type == nil) then
-        readFlows = nil
+local readFields = df.readFields
+if readFields then
+    local ok, read, count = pcall(readFields, df.global.world.units.active, {fields = {'id'}}, {})
+    if not (ok and type(read) == 'table' and type(count) == 'number' and type(read.id) == 'table') then
+        readFields = nil
     end
 end
 
@@ -942,7 +942,7 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     return same
 end
 
--- The same scan, reading each block's flows with one dfhack.maps.readFlows call.
+-- The same scan, reading each block's flows with one df.readFields call.
 local function find_flows_read(x1, y1, x2, y2, z, tick)
     local OceanWave, SeaFoam, Steam = df.flow_type.OceanWave, df.flow_type.SeaFoam, df.flow_type.Steam
     local zkey = z * 16777216
@@ -951,10 +951,11 @@ local function find_flows_read(x1, y1, x2, y2, z, tick)
     local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
-            local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_SCAN, flows_read)
-            local count = read.n
-            if count > 0 then
-                local types, densities, xs, ys = read.type, read.density, read.x, read.y
+            local block = getTileBlock(block_x, block_y, z)
+            local read, count
+            if block then read, count = readFields(block.flows, READ_SCAN, flows_read) end
+            if block and count > 0 then
+                local types, densities, xs, ys = read.type, read.density, read['pos.x'], read['pos.y']
                 local place = listed
                 listed = listed + count
                 for i = 1, count do
@@ -1017,7 +1018,7 @@ local function find_flows_read(x1, y1, x2, y2, z, tick)
     seen_waves.x1, seen_waves.y1, seen_waves.x2, seen_waves.y2 = x1, y1, x2, y2
     return same
 end
-if readFlows then find_flows = find_flows_read end
+if readFields then find_flows = find_flows_read end
 
 -- Between the game's own flow updates (see FLOW_TICKS) a flow can still start: steam where magma meets
 -- water, on any tick. The game then adds a flow, or brings a spent one back to full, or tops one up: each
@@ -1045,25 +1046,28 @@ local function flows_untouched(x1, y1, x2, y2, z)
     return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
 end
 
--- The same check with dfhack.maps.readFlows.
+-- The same check with df.readFields.
 local function flows_untouched_read(x1, y1, x2, y2, z)
     local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
-            local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_DENSITY, flows_read)
-            local densities = read.density
-            local place = listed
-            listed = listed + read.n
-            for i = 1, read.n do
-                local density = densities[i]
-                density_sum = density_sum + density
-                weighted = weighted + density * (place + i)
+            local block = getTileBlock(block_x, block_y, z)
+            if block then
+                local read, count = readFields(block.flows, READ_DENSITY, flows_read)
+                local densities = read.density
+                local place = listed
+                listed = listed + count
+                for i = 1, count do
+                    local density = densities[i]
+                    density_sum = density_sum + density
+                    weighted = weighted + density * (place + i)
+                end
             end
         end
     end
     return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
 end
-if readFlows then flows_untouched = flows_untouched_read end
+if readFields then flows_untouched = flows_untouched_read end
 
 ----------------------------------------------------------------------------------------------
 -- Planning what to draw
