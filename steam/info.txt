@@ -3,7 +3,7 @@
 [DISPLAYED_VERSION:1.0]
 [EARLIEST_COMPATIBLE_NUMERIC_VERSION:1]
 [EARLIEST_COMPATIBLE_DISPLAYED_VERSION:1.0]
-[AUTHOR:Tom Van Eyck]
+[AUTHOR:vaneyckt7]
 [NAME:Improved Water]
 [DESCRIPTION:Requires DFHack. Draws moving light on water and the sea's waves, wash, foam and spray in graphics mode. Purely visual: it only shows what the game already simulates. Works in existing forts; it does not need to be added to a world.]
 
@@ -11,4 +11,8 @@
 [STEAM_DESCRIPTION:Requires DFHack. Draws moving light on water and the sea's waves, wash, foam and spray in graphics mode. Purely visual: it only shows what the game already simulates. Works in existing forts; it does not need to be added to a world. Inspired by Flowing Waves by Poss.]
 [STEAM_TAG:dfhack]
 [STEAM_TAG:mod]
+[STEAM_TAG:graphics]
 [STEAM_TAG:cosmetic]
+[STEAM_KEY_VALUE_TAG:dfhack:required]
+[STEAM_CHANGELOG:First release.]
+[STEAM_FILE_ID:3845811090]
