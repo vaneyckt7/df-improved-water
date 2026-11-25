@@ -93,7 +93,7 @@ the sand on the first floor layer and the log lies in the water.
 - ours, built by `tools/fwsheets.py`: `seafoam.png` (foam on the beach and spray), `swell.png` (crests out at
   sea) and `rock_fringe.png` (rock and pebble tiles beside the water: the water laps a few px onto the rock,
   with a foam rim)
-- the mod author's, recoloured with `tools/fwtint.py`: `wash.png` (the mod's `riversheet.png`: the thin water running over the beach) and
+- the mod author's, recoloured with `tools/fwtint.py`: `wash.png` (one row of the mod's `riversheet.png`: the thin water running over the beach; the script draws every wash tile as open water on all sides, which is one picture in the mod's 256 rows) and
   `sea_fringe.png` (the mod's `riverseafringe.png`: the lip of wash on the sea tiles)
 
     python fwsheets.py ../game/improved-water-art preview.png
@@ -124,7 +124,7 @@ Sea and wash caustics: `SEA_WASH` (wave density from which a beach tile under a 
   opaque. (Cause not established; giving invisible pixels the foam colour did not change it.)
 
 `tools/fwtint.py` lightens the water of the mod's wash sheets (`riversheet.png` and `riverseafringe.png`), so the thin water on the beach is lighter than the sea instead of darker. It reads a copy of
-the mod's originals and writes into an output folder (the copies in `game/improved-water-art/` were made this way). It writes them under our names, `wash.png` and `sea_fringe.png`. The
+the mod's originals and writes into an output folder (the copies in `game/improved-water-art/` were made this way). It writes them under our names, `wash.png` (only the one row the script draws) and `sea_fringe.png`. The
 wash colour is repeated in `fwsheets.py` (`WASH`).
 
     python -I fwtint.py <mod>/art_original <mod>/art 30,128,138   # colour the base water becomes

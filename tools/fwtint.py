@@ -6,7 +6,8 @@ beach should look lighter than the open sea, not darker.
 "-" keeps the colours; the opacity factor (default 1) multiplies every pixel's opacity.
 
 Reads the mod's own riversheet.png and riverseafringe.png from the first folder (a copy of the originals)
-and writes recoloured ones into the second under this repo's names, wash.png and sea_fringe.png. (The mod's
+and writes recoloured ones into the second under this repo's names, wash.png (cut down to the one row the
+script draws) and sea_fringe.png. (The mod's
 riverfringe.png is not used: rock_fringe.png is built by fwsheets.py.) Each colour channel is scaled
 toward white so that the sheets' base water colour BASE becomes the target colour.
 The results are derived from the mod author's art, so they are not kept in this repo.
@@ -16,6 +17,10 @@ import numpy as np
 from PIL import Image
 
 BASE = np.array([5.0, 81.0, 94.0])
+# The mod's riversheet.png has 256 rows of 16 frames: (touches the sea?, sides where the water carries on,
+# flow direction). The script draws every wash tile as open water on every side, and those 16 rows are one
+# and the same picture, so wash.png keeps only that row.
+WASH_ROW = 120
 NAMES = {'riversheet.png': 'wash.png', 'riverseafringe.png': 'sea_fringe.png'}   # the mod's name -> ours
 
 if __name__ == '__main__':
@@ -33,5 +38,7 @@ if __name__ == '__main__':
         rgb = rgb / np.clip(alpha[..., None] / 255.0, 0.2, 1)
         a[..., :3] = np.clip(rgb + 0.5, 0, 255).astype(np.uint8)
         a[..., 3] = (alpha + 0.5).astype(np.uint8)
+        if out_name == 'wash.png':
+            a = a[WASH_ROW * 32:(WASH_ROW + 1) * 32]
         Image.fromarray(a).save(os.path.join(dst, out_name))
         print(name, '->', out_name, a.shape)

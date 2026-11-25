@@ -552,7 +552,6 @@ local DX = {0, 1, 0, -1, 1, -1, 1, -1}
 local DY = {-1, 0, 1, 0, -1, -1, 1, 1}
 local DKEY = {-4096, 1, 4096, -1, -4095, -4097, 4097, 4095}
 local BIT = {1, 2, 4, 8, 16, 32, 64, 128}
-local ALL_SIDES_WET = 15
 
 -- The eight ways river water can flow, in the order vanilla's FLOWS page (and so the wash sheet)
 -- stores them: NW, NE, SE, SW, N, S, W, E.
@@ -647,16 +646,14 @@ end
 
 -- Each sheet holds rows of 16 frames; a row is known by the tile number of its first frame. A tile
 -- shows frame (step + frame_shift) % FRAMES of its row.
---   wash sheet    a row for each (touches the sea?, sides where the water carries on, flow direction).
---                 Rows touching the sea are opaque on the sea side.
+--   wash sheet    one row: open water on every side. (The Flowing Waves mod's sheet has 256 rows, for
+--                 the sides where the water stops and for each flow direction; with every side drawn as
+--                 open water they all come to this one picture, so only it is kept.) The flow direction
+--                 sets the frame shift, not the picture.
 --   fringe sheets (rock and sea alike) a row for each combination of sides and corners that face the wash
 --   foam sheet    a row for each (stage, sides joined to more foam or a wave, variant). The foam lies
 --                 still; the frames only add a little static.
 --   swell sheet   a row for each (heading, whiteness)
-local function wash_row(touches_sea, wet_sides, direction_index)
-    return (((touches_sea and 1 or 0) * 16 + wet_sides) * 8 + (direction_index - 1)) * FRAMES + 1
-end
-
 local function foam_row(stage, joined_sides, x, y)
     return ((stage * 16 + joined_sides) * FOAM_VARIANTS + (x * 7 + y * 13) % FOAM_VARIANTS) * FRAMES + 1
 end
@@ -772,19 +769,13 @@ local function wash_miss(x, y, key)
         wash_first[key] = 0
         return 0
     end
-    local touches_sea = false
-    for side = 1, 4 do
-        local near = key + DKEY[side]
-        if (kind_now[near] or terrain_miss(x + DX[side], y + DY[side], near)) == K_SEA then touches_sea = true end
-    end
     local full = key + level_key
     local facing = shore_flow[full] or shore_miss(x, y, full)
     local tiletype = getTileType(x, y, level)
-    local first = wash_row(touches_sea, ALL_SIDES_WET, facing)
-    wash_first[key] = first
+    wash_first[key] = 1
     wash_shift[key] = -(x * FLOW_DX[facing] + y * FLOW_DY[facing])
     wash_layer[key] = (tiletype and WASH_UNDER[tiletype]) and UNDER or FLOOR
-    return first
+    return 1
 end
 
 ----------------------------------------------------------------------------------------------
@@ -1146,15 +1137,9 @@ local function plan(z)
         -- The boulder is drawn on the second floor layer, over this one. Under it goes the same
         -- wash as on the tiles around it (same colour, same moving pattern), not a flat square.
         local x, y, key = boulder_x[i], boulder_y[i], boulder_key[i]
-        local touches_sea = false
-        for side = 1, 4 do
-            local near = key + DKEY[side]
-            if (kind_now[near] or terrain_miss(x + DX[side], y + DY[side], near)) == K_SEA then touches_sea = true end
-        end
         local full = key + level_key
         local facing = shore_flow[full] or shore_miss(x, y, full)
-        piece(x, y, 'wash', wash_row(touches_sea, ALL_SIDES_WET, facing),
-            -(x * FLOW_DX[facing] + y * FLOW_DY[facing]), UNDER, false)
+        piece(x, y, 'wash', 1, -(x * FLOW_DX[facing] + y * FLOW_DY[facing]), UNDER, false)
     end
 
     -- Spray shows as whitecaps only on the water: over a wave or the sea. Whitecaps join up
