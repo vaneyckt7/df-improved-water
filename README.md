@@ -65,13 +65,19 @@ Layers: the caustics are written to the map viewport layer `screentexpos_signpos
 (water under boulders), `screentexpos_background_two` (wash and foam, where that slot is free) and the
 interface layer (everything else), so waves and foam show over the caustics.
 
-Fog: in fog the game paints its haze over the interface layer of the whole view after the overlay has drawn,
-which would wipe the foam rims, foam, spray and crests. When at least 90% of the view was hazed in the last
-frame, those pieces go to `screentexpos_designation` instead and show through the haze. A view that is partly
-indoors may stay under that limit; then the top pieces are hidden by the haze. A DFHack tool that fills the
-interface layer of the whole view (`gui/pathable`) counts as fog in the same way. Checked in real fog
-(2026-11-24): all top pieces went under the haze. The game itself leaves single tiles clear of haze; those
-squares are there with the overlay off too.
+Fog: the game paints its haze over the interface layer after the overlay has drawn, which would wipe the foam
+rims, foam, spray and crests. So for each cell the script looks at the last frame's interface layer
+(`screentexpos_interface_old`): where the game had a picture of its own there, the piece goes to
+`screentexpos_designation` instead and shows through the haze. The same holds for the few cells where the game
+puts a rain picture on top in clear weather (there the piece was lost before). Checked in real fog and with the
+fog lifted (2026-11-24): in fog all top pieces went under the haze, also in views that were partly rock wall;
+without fog they were painted on top as before. The fog on this test map is always on; for the clear-weather
+check the map tile's cloud values (`world_data.region_map[x]:_displace(y).clouds.fog` and `.stratus`) were held
+at 0 for about 1,000 ticks.
+
+Memory: the art is loaded outside DFHack's shared texture range (10,000 places for all tools; this art alone
+took 8,448 of them). The tables of classified tiles are emptied once they pass 200,000 tiles (about 11,000 are
+added per level when a whole 192x192 map is looked over) and fill again from the view.
 
 Added to the mod's logic: all natural ground that touches the open sea (rock, pebbles, sand, soil, grass,
 boulders; not built floors) gets the rock rim, not only rock beside the wash. The game's own frayed sand

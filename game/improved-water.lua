@@ -592,8 +592,10 @@ local function art_path(name)
     return copy
 end
 
+-- Not from DFHack's reserved texture range: it has 10,000 places for all tools together, and at a fresh
+-- start this art took 8,448 of them (measured; the other 12,288 tiles went to the ordinary range anyway).
 local function load_tiles(name)
-    return dfhack.textures.loadTileset(art_path(name), 32, 32, true)
+    return dfhack.textures.loadTileset(art_path(name), 32, 32, false)
 end
 
 local SHEET_NAMES = {'wash', 'rock_fringe', 'sea_fringe', 'sea_foam', 'swell'}
@@ -694,6 +696,11 @@ kind_now = kind_now or {}
 known_kind = known_kind or {}
 known_type = known_type or {}
 shore_flow = shore_flow or {}
+-- known_kind, known_type and shore_flow hold every tile ever classified, on every level looked at
+-- (measured: about 11,000 more per level when the view is swept over a whole 192x192 map). Past
+-- KNOWN_MAX tiles they are emptied at the start of a round and fill again from what is in view.
+local KNOWN_MAX = 200000
+known_count = known_count or 0
 terrain_round = terrain_round or 0
 plan_number = plan_number or 0
 local level, level_key = -1, 0        -- the level kind_now is for
@@ -714,6 +721,7 @@ local function terrain_miss(x, y, key)
             for dx = -SHORE_RADIUS, SHORE_RADIUS do shore_flow[row + dx] = nil end
         end
     end
+    if not was then known_count = known_count + 1 end
     known_kind[full], known_type[full] = kind, tiletype
     kind_now[key] = kind
     return kind
@@ -1229,6 +1237,7 @@ function WavesOverlay:rescan(viewport, now, tick)
         terrain_round = terrain_round + 1
         self.next_terrain_round = now + TERRAIN_RECHECK_MS
         kind_now, wash_first, wash_shift, wash_layer = {}, {}, {}, {}
+        if known_count > KNOWN_MAX then known_kind, known_type, shore_flow, known_count = {}, {}, {}, 0 end
         forget_texposes()
     end
     if z ~= level then
@@ -1255,7 +1264,7 @@ function WavesOverlay:rescan(viewport, now, tick)
     plan(z)
     self.plan_round, self.plan_z, self.plan_water, self.plan_has_water = terrain_round, z, state.view_id, has_water
     -- If the shoreline moved while planning, some of this plan was made with the old shore directions:
-    -- plan again at the next scan.
+    -- plan again in the next frame.
     self.replan = shores_moved
     if shores_moved then
         shores_moved = false
@@ -1305,38 +1314,22 @@ end
 -- Writes the draw list. The map's screen layers are rebuilt by the game every frame and drawn
 -- after overlays render, so anything written to them lasts exactly one frame and has to be
 -- written again each frame.
--- Fog. In fog the game draws its haze on the interface layer of every map tile in view, and fills that
--- layer in after this overlay has painted (measured: 187 pieces painted, all 187 there right after, none
--- left when the frame is shown). So in fog every piece painted on top (foam rims, foam, spray, crests) was
--- lost. The layer's copy of the last frame tells: in fog nearly all of it is filled, in clear weather
--- only this script's pieces and the odd steam cloud are. In fog the pieces go to the layer just below
--- instead, and show through the haze like the rest of the map. (A single steam cloud hides the piece
--- under it in the same way; that is left as it is.)
+-- Fog. The game draws its haze on the interface layer of the map tiles in view, and fills that layer in
+-- after this overlay has painted (measured: 187 pieces painted, all 187 there right after, none left when
+-- the frame is shown; a test picture written to a cell the game also uses was gone the same way). So a
+-- piece painted on top (foam rims, foam, spray, crests) is lost wherever the game has something of its
+-- own on top: everywhere in fog, and under a rain puddle or a cloud. The layer's copy of the last frame
+-- tells where that is: a cell that holds something this script did not paint there. On those cells the
+-- piece goes to the layer just below instead, where it shows through like the rest of the map. This is
+-- decided per cell, because a whole-view rule misjudges: a foggy view can be 17% clear (rock wall), and
+-- rain alone put the game's puddles on 7.6% of a clear one (both measured).
 local FOG_LAYER = 'screentexpos_designation'
 
--- Pieces painted on top fill the layer themselves, and pieces moved below do not, so the count of clear
--- tiles shifts by up to the number of pieces when the answer changes. Once in fog, that many more clear
--- tiles are needed to leave it again, or a view on the limit would flip every frame.
-local in_fog, fog_pieces = false, 0
+-- what this script last painted on top, per cell of the view
+local top_mine = {}
 
-local function fog_in_view(port)
-    local last_top = port.screentexpos_interface_old
-    local cells = port.dim_x * port.dim_y
-    local clear_left = cells // 10   -- more clear tiles than this and it is not fog
-    if in_fog then clear_left = clear_left + fog_pieces end
-    in_fog = false
-    for i = 0, cells - 1 do
-        if last_top[i] == 0 then
-            clear_left = clear_left - 1
-            if clear_left < 0 then return false end
-        end
-    end
-    in_fog = true
-    return true
-end
-
-function WavesOverlay:draw(port, screen_x, screen_y, fog)
-    local under_fog = port[FOG_LAYER]
+function WavesOverlay:draw(port, screen_x, screen_y)
+    local under_fog, mine, last_top = port[FOG_LAYER], top_mine, port.screentexpos_interface_old
     local floor_two = port.screentexpos_background_two
     local floor_one = port.screentexpos_background
     local floor_flag = port.screentexpos_floor_flag
@@ -1354,10 +1347,12 @@ function WavesOverlay:draw(port, screen_x, screen_y, fog)
             floor_two[index] = d_texpos[i]
             if d_clears[i] then floor_flag[index] = 0 end
         else
-            if fog and index >= 0 then
+            local theirs = index >= 0 and last_top[index] or 0
+            if theirs ~= 0 and theirs ~= mine[index] then
                 under_fog[index] = d_texpos[i]
             else
                 paint(TILE_PEN, screen_x + d_sx[i], screen_y + d_sy[i], ' ', d_texpos[i], true)
+                if index >= 0 then mine[index] = d_texpos[i] end
             end
             if index >= 0 and d_clears[i] then floor_flag[index] = 0 end
         end
@@ -1452,13 +1447,16 @@ function WavesOverlay:onRenderFrame(dc, viewport)
         self.seen_incoming, self.seen_newest, self.seen_newest_at = incoming, newest, newest_at
         self.flows_stale, self.crests_stale = true, true
     end
-    if now >= self.next_scan then
+    -- A new view or a new water list from the caustics is planned for in this frame, without waiting for
+    -- the next scan (measured: after a pan of one tile a rim piece came 70 ms late).
+    local view_changed = state.view_id ~= self.scan_water or z ~= self.scan_z or x1 ~= self.scan_x1
+        or y1 ~= self.scan_y1 or viewport.x2 ~= self.scan_x2 or viewport.y2 ~= self.scan_y2
+        or (state.cache ~= nil and state.z == z) ~= self.plan_has_water
+    if view_changed or now >= self.next_scan then
         -- The flows are read again when the game may have changed them (see FLOW_TICKS), when the view or
         -- the caustics' water list has changed, and once per terrain round.
-        if tick // FLOW_TICKS ~= self.scan_period or self.flows_stale
+        if view_changed or tick // FLOW_TICKS ~= self.scan_period or self.flows_stale
                 or self.replan or now >= self.next_terrain_round
-                or state.view_id ~= self.scan_water or z ~= self.scan_z or x1 ~= self.scan_x1 or y1 ~= self.scan_y1
-                or viewport.x2 ~= self.scan_x2 or viewport.y2 ~= self.scan_y2
                 or not flows_untouched(x1, y1, viewport.x2, viewport.y2, z) then
             self:rescan(viewport, now, tick)
         else
@@ -1470,7 +1468,9 @@ function WavesOverlay:onRenderFrame(dc, viewport)
                 self.next_foam_cleanup = now + FORGET_FOAM_MS
             end
         end
-        self.next_scan = now + RESCAN_MS
+        -- a plan that has to be made again (the shoreline moved while planning) is made in the next frame,
+        -- not a scan later: measured, after a jump of the view some rims came up to 0.2 s late
+        self.next_scan = self.replan and 0 or now + RESCAN_MS
     end
     local any_crests = incoming > 0
     if piece_count == 0 and not any_crests then return end
@@ -1503,22 +1503,24 @@ function WavesOverlay:onRenderFrame(dc, viewport)
 
     -- the same screen origin the painter would use for map tiles
     local screen_x, screen_y = dc.x1, dc.y1
-    local fog = fog_in_view(port)
     if any_crests then
         local paint = dfhack.screen.paintTile
         local c_sx, c_sy, c_texpos = self.crest_sx, self.crest_sy, self.crest_texpos
         local under_fog, view_dim_x, view_dim_y = port[FOG_LAYER], port.dim_x, port.dim_y
+        local last_top, mine = port.screentexpos_interface_old, top_mine
         for i = 1, self.crest_count do
             local sx, sy = c_sx[i], c_sy[i]
-            if fog and sx >= 0 and sy >= 0 and sx < view_dim_x and sy < view_dim_y then
-                under_fog[sx * view_dim_y + sy] = c_texpos[i]
+            local index = sx >= 0 and sy >= 0 and sx < view_dim_x and sy < view_dim_y and sx * view_dim_y + sy or -1
+            local theirs = index >= 0 and last_top[index] or 0
+            if theirs ~= 0 and theirs ~= mine[index] then
+                under_fog[index] = c_texpos[i]
             else
                 paint(TILE_PEN, screen_x + sx, screen_y + sy, ' ', c_texpos[i], true)
+                if index >= 0 then mine[index] = c_texpos[i] end
             end
         end
     end
-    self:draw(port, screen_x, screen_y, fog)
-    if fog then fog_pieces = self.draw_count + self.crest_count end
+    self:draw(port, screen_x, screen_y)
     timed_since('frame', now)
 end
 
