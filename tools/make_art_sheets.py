@@ -275,6 +275,9 @@ if __name__ == '__main__':
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
     foam, crest = seafoam(), swell()
+    for name in ('sea_foam', 'swell', 'rock_fringe'):     # full-layout sheets again: tools/pack_sheets.py packs them
+        if os.path.exists(os.path.join(out, name + '.rows')):
+            os.remove(os.path.join(out, name + '.rows'))
     Image.fromarray(foam).save(os.path.join(out, 'sea_foam.png'))
     Image.fromarray(crest).save(os.path.join(out, 'swell.png'))
     fringe = rockfringe()

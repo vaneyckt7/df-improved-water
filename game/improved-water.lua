@@ -592,9 +592,37 @@ local function art_path(name)
 end
 
 -- Not from DFHack's reserved texture range: it has 10,000 places for all tools together, and this art
--- alone is 16,656 tiles.
+-- alone is 12,736 tiles.
+--
+-- A sheet may come with a .rows file (written by tools/pack_sheets.py): the PNG then holds each different
+-- row once, and the file gives, for every row of the full layout, the packed row with its picture. The
+-- list returned is in the full layout either way, repeated rows sharing their tiles, so the rest of the
+-- script does not know the difference.
 local function load_tiles(name)
-    return dfhack.textures.loadTileset(art_path(name), 32, 32, false)
+    local tiles = dfhack.textures.loadTileset(art_path(name), 32, 32, false)
+    local file = io.open(art_dir .. name:gsub('%.png$', '.rows'), 'r')
+    if not file or not tiles then
+        if file then file:close() end
+        return tiles
+    end
+    local packed_row, packed_rows = {}, 0
+    for number in file:read('a'):gmatch('%d+') do
+        local row = tonumber(number)
+        packed_row[#packed_row + 1] = row
+        if row >= packed_rows then packed_rows = row + 1 end
+    end
+    file:close()
+    if packed_rows * FRAMES ~= #tiles then
+        dfhack.printerr(('improved-water: %s has %d rows but its .rows file expects %d (after updating the '
+            .. 'files in a running game, run: improved-water reload)'):format(name, #tiles // FRAMES, packed_rows))
+        return {}
+    end
+    local full = {}
+    for row = 1, #packed_row do
+        local from, to = packed_row[row] * FRAMES, (row - 1) * FRAMES
+        for frame = 1, FRAMES do full[to + frame] = tiles[from + frame] end
+    end
+    return full
 end
 
 local SHEET_NAMES = {'wash', 'rock_fringe', 'sea_fringe', 'sea_foam', 'swell'}

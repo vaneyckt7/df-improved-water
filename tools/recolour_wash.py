@@ -42,4 +42,7 @@ if __name__ == '__main__':
         if out_name == 'wash.png':
             a = a[WASH_ROW * 32:(WASH_ROW + 1) * 32]
         Image.fromarray(a).save(os.path.join(dst, out_name))
+        rows_file = os.path.join(dst, out_name[:-4] + '.rows')   # a full-layout sheet again: tools/pack_sheets.py packs it
+        if os.path.exists(rows_file):
+            os.remove(rows_file)
         print(name, '->', out_name, a.shape)

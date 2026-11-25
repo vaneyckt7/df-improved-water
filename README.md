@@ -82,7 +82,7 @@ check the map tile's cloud values (`world_data.region_map[x]:_displace(y).clouds
 at 0 for about 1,000 ticks. Without the mod none of this comes into play.
 
 Memory: the art is loaded outside DFHack's shared texture range (10,000 places for all tools; this art alone
-is 16,656 tiles). The tables of classified tiles are emptied once they pass 200,000 tiles (about 11,000 are
+is 12,736 tiles). The tables of classified tiles are emptied once they pass 200,000 tiles (about 11,000 are
 added per level when a whole 192x192 map is looked over) and fill again from the view.
 
 Added to the mod's logic: all natural ground that touches the open sea (rock, pebbles, sand, soil, grass,
@@ -99,6 +99,12 @@ the sand on the first floor layer and the log lies in the water.
   with a foam rim)
 - the mod author's, recoloured with `tools/recolour_wash.py`: `wash.png` (one row of the mod's `riversheet.png`: the thin water running over the beach; the script draws every wash tile as open water on all sides, which is one picture in the mod's 256 rows) and
   `sea_fringe.png` (the mod's `riverseafringe.png`: the lip of wash on the sea tiles)
+
+`sea_foam.png` and `sea_fringe.png` are packed: many of their rows are pixel for pixel the same as another
+row (all the empty ones, for a start), so each different row is kept once and a `.rows` file beside the PNG
+says which packed row every row of the full layout uses (12,736 tiles loaded instead of 16,656; nothing
+drawn changes). `tools/pack_sheets.py <art dir>` does this, and is to be run after either of the two tools
+above, which write full-layout sheets. A sheet without a `.rows` file is read as a full-layout sheet.
 
     python make_art_sheets.py ../game/improved-water-art preview.png
 
