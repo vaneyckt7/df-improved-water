@@ -65,15 +65,17 @@ Layers: the caustics are written to the map viewport layer `screentexpos_signpos
 (water under boulders), `screentexpos_background_two` (wash and foam, where that slot is free) and the
 interface layer (everything else), so waves and foam show over the caustics.
 
-Fog: the game paints its haze over the interface layer after the overlay has drawn, which would wipe the foam
-rims, foam, spray and crests. So for each cell the script looks at the last frame's interface layer
-(`screentexpos_interface_old`): where the game had a picture of its own there, the piece goes to
-`screentexpos_designation` instead and shows through the haze. The same holds for the few cells where the game
-puts a rain picture on top in clear weather (there the piece was lost before). Checked in real fog and with the
-fog lifted (2026-11-24): in fog all top pieces went under the haze, also in views that were partly rock wall;
-without fog they were painted on top as before. The fog on this test map is always on; for the clear-weather
+Fog and rain of the Detailed Weather mod: its overlay (`detailed_weather.map_drawn`) draws haze and rain
+pictures on the interface layer after this overlay has drawn, which would wipe the foam rims, foam, spray and
+crests. (The game itself draws nothing there: with that overlay off the layer stayed empty in thick fog.) So for
+each cell the script looks at the last frame's interface layer (`screentexpos_interface_old`): where something
+other than its own piece was there, the piece goes to `screentexpos_designation` instead and shows through.
+This holds for the haze and for the few cells with a rain picture in clear weather (there the piece was lost
+before), and for any other tool that draws on that layer afterwards. Checked with the mod's fog and with the fog
+lifted (2026-11-24): in fog all top pieces went under the haze, also in views that were partly rock wall;
+without fog they were painted on top as before. The fog on the test map is always on; for the clear-weather
 check the map tile's cloud values (`world_data.region_map[x]:_displace(y).clouds.fog` and `.stratus`) were held
-at 0 for about 1,000 ticks.
+at 0 for about 1,000 ticks. Without the mod none of this comes into play.
 
 Memory: the art is loaded outside DFHack's shared texture range (10,000 places for all tools; this art alone
 took 8,448 of them). The tables of classified tiles are emptied once they pass 200,000 tiles (about 11,000 are

@@ -1314,15 +1314,16 @@ end
 -- Writes the draw list. The map's screen layers are rebuilt by the game every frame and drawn
 -- after overlays render, so anything written to them lasts exactly one frame and has to be
 -- written again each frame.
--- Fog. The game draws its haze on the interface layer of the map tiles in view, and fills that layer in
--- after this overlay has painted (measured: 187 pieces painted, all 187 there right after, none left when
--- the frame is shown; a test picture written to a cell the game also uses was gone the same way). So a
--- piece painted on top (foam rims, foam, spray, crests) is lost wherever the game has something of its
--- own on top: everywhere in fog, and under a rain puddle or a cloud. The layer's copy of the last frame
--- tells where that is: a cell that holds something this script did not paint there. On those cells the
--- piece goes to the layer just below instead, where it shows through like the rest of the map. This is
--- decided per cell, because a whole-view rule misjudges: a foggy view can be 17% clear (rock wall), and
--- rain alone put the game's puddles on 7.6% of a clear one (both measured).
+-- Fog and rain of the Detailed Weather mod. Its overlay (detailed_weather.map_drawn) draws haze and rain
+-- pictures on the interface layer of the map tiles in view, after this overlay has painted (measured: 187
+-- pieces painted, all 187 there right after, none left when the frame is shown; with that overlay off the
+-- layer stays empty, also in thick fog). So a piece painted on top (foam rims, foam, spray, crests) is
+-- lost wherever something else is drawn on top afterwards: everywhere in the mod's fog, and under one of
+-- its rain pictures. The layer's copy of the last frame tells where that is: a cell that holds something
+-- this script did not paint there. On those cells the piece goes to the layer just below instead, where
+-- it shows through like the rest of the map. This is decided per cell, because a whole-view rule
+-- misjudges: a foggy view can be 17% clear (rock wall), and rain alone covered 7.6% of a clear one (both
+-- measured).
 local FOG_LAYER = 'screentexpos_designation'
 
 -- What this script painted on top, per cell of the view: top_last in the frame before (what the layer's
