@@ -845,7 +845,7 @@ local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 local found, found_count = {}, 0
 
 -- dfhack.maps.readFlows reads a block's flows in one call into the game (measured: a scan in about a
--- quarter of the time, the densities alone in a sixth). It is not in every DFHack: without it, or with
+-- third of the time, the densities alone in a fifth). It is not in every DFHack: without it, or with
 -- one that answers differently from the one this was written for, the flows are read one field at a
 -- time. Each way has its own scan and its own check below; both list the same flows in the same order.
 local READ_SCAN = {include_dead = true, fields = {'type', 'density', 'x', 'y'}}
