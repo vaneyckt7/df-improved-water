@@ -33,6 +33,10 @@ To switch it off: `overlay disable improved-water.overlay`. To remove it: delete
 The script only draws; it writes nothing to the fort or the save. (`improved-water reload` puts copies of the
 art in `improved-water-art/reloaded/`.)
 
+Updating while the game is running: after copying new files in, run `improved-water reload`. DFHack keeps
+the art it has already loaded, so without it the new script draws from the old sheets and picks wrong
+pictures. Restarting the game does the same job.
+
 ## Files
 
 `game/` holds the files as installed in `<Dwarf Fortress>/dfhack-config/scripts/`:
@@ -78,7 +82,7 @@ check the map tile's cloud values (`world_data.region_map[x]:_displace(y).clouds
 at 0 for about 1,000 ticks. Without the mod none of this comes into play.
 
 Memory: the art is loaded outside DFHack's shared texture range (10,000 places for all tools; this art alone
-took 8,448 of them). The tables of classified tiles are emptied once they pass 200,000 tiles (about 11,000 are
+is 16,656 tiles). The tables of classified tiles are emptied once they pass 200,000 tiles (about 11,000 are
 added per level when a whole 192x192 map is looked over) and fill again from the view.
 
 Added to the mod's logic: all natural ground that touches the open sea (rock, pebbles, sand, soil, grass,

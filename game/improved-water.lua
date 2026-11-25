@@ -553,8 +553,8 @@ local DY = {-1, 0, 1, 0, -1, -1, 1, 1}
 local DKEY = {-4096, 1, 4096, -1, -4095, -4097, 4097, 4095}
 local BIT = {1, 2, 4, 8, 16, 32, 64, 128}
 
--- The eight ways river water can flow, in the order vanilla's FLOWS page (and so the wash sheet)
--- stores them: NW, NE, SE, SW, N, S, W, E.
+-- The eight ways river water can flow, in the order vanilla's FLOWS page stores them (the
+-- Flowing Waves mod's sheets use the same order): NW, NE, SE, SW, N, S, W, E.
 local FLOW_DX = {-1, 1, 1, -1, 0, 0, -1, 1}
 local FLOW_DY = {-1, -1, 1, 1, -1, 1, 0, 0}
 
@@ -591,8 +591,8 @@ local function art_path(name)
     return copy
 end
 
--- Not from DFHack's reserved texture range: it has 10,000 places for all tools together, and at a fresh
--- start this art took 8,448 of them (measured; the other 12,288 tiles went to the ordinary range anyway).
+-- Not from DFHack's reserved texture range: it has 10,000 places for all tools together, and this art
+-- alone is 16,656 tiles.
 local function load_tiles(name)
     return dfhack.textures.loadTileset(art_path(name), 32, 32, false)
 end
@@ -768,6 +768,12 @@ local function wash_miss(x, y, key)
         -- a boulder keeps its own tile; the water goes under it
         wash_first[key] = 0
         return 0
+    end
+    -- Classify the four neighbours first: if one has changed kind since the last round, that clears the
+    -- kept shore directions around it, this tile's among them, so the direction read below is fresh.
+    for side = 1, 4 do
+        local near = key + DKEY[side]
+        if not kind_now[near] then terrain_miss(x + DX[side], y + DY[side], near) end
     end
     local full = key + level_key
     local facing = shore_flow[full] or shore_miss(x, y, full)

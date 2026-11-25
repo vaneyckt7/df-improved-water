@@ -10,7 +10,8 @@ and writes recoloured ones into the second under this repo's names, wash.png (cu
 script draws) and sea_fringe.png. (The mod's
 riverfringe.png is not used: rock_fringe.png is built by make_art_sheets.py.) Each colour channel is scaled
 toward white so that the sheets' base water colour BASE becomes the target colour.
-The results are derived from the mod author's art, so they are not kept in this repo.
+The results are derived from the mod author's art (Poss, Flowing Waves); the copies in
+game/improved-water-art/ were made this way.
 """
 import sys, os
 import numpy as np
