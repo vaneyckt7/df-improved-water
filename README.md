@@ -182,3 +182,15 @@ If the script meets an error while drawing, it reports it once, draws nothing mo
 overlays alone, until `improved-water retry` or the next game start.
 
 Never call `dfhack.textures.deleteHandle` when reloading (it crashed the game); old textures are leaked instead.
+
+## Credits
+
+The ocean waves are built on the Flowing Waves mod 1.3 by Poss
+([Steam Workshop 3829998283](https://steamcommunity.com/sharedfiles/filedetails/?id=3829998283)):
+
+- the wave-drawing part of `improved-water.lua` is that mod's script (`scripts_modactive/flowing_waves.lua`),
+  copied in and changed
+- `improved-water-art/wash.png` and `improved-water-art/sea_fringe.png` are that mod's art (`riversheet.png` and
+  `riverseafringe.png`), recoloured
+
+Both remain Poss's work. The Flowing Waves mod does not need to be installed for this script to run.
