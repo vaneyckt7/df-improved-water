@@ -844,6 +844,22 @@ local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 -- one number per flow found (what it is, where, its stage), to tell whether anything has changed
 local found, found_count = {}, 0
 
+-- dfhack.maps.readFlows reads a block's flows in one call into the game (measured: a scan in about a
+-- quarter of the time, the densities alone in a sixth). It is not in every DFHack: without it, or with
+-- one that answers differently from the one this was written for, the flows are read one field at a
+-- time. Both ways list the same flows in the same order.
+local READ_SCAN = {include_dead = true, fields = {'type', 'density', 'x', 'y'}}
+local READ_DENSITY = {include_dead = true, fields = {'density'}}
+local flows_read = {}
+local readFlows = dfhack.maps.readFlows
+if readFlows then
+    local ok, read = pcall(readFlows, 0, 0, 0, 0, 0, 0, READ_DENSITY, {})
+    if not (ok and type(read) == 'table' and type(read.n) == 'number' and type(read.density) == 'table'
+            and read.type == nil) then
+        readFlows = nil
+    end
+end
+
 -- Reads the wave, foam and spray flows on level z in the map blocks that the rectangle touches. Each
 -- field read from a flow is a call into the game, so each is read once. Returns whether the flows are
 -- the same as at the last scan.
@@ -855,23 +871,34 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
-            local block = getTileBlock(block_x, block_y, z)
-            local flows = block and block.flows
-            if flows then
+            local flows, count, types, densities, xs, ys
+            if readFlows then
+                local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_SCAN, flows_read)
+                count, types, densities, xs, ys = read.n, read.type, read.density, read.x, read.y
+            else
+                local block = getTileBlock(block_x, block_y, z)
+                flows = block and block.flows
                 -- (indexed: ipairs over one of the game's lists takes four times as long per item)
-                local count = #flows
+                count = flows and #flows
+            end
+            if count then
                 local place = listed + 1
                 listed = listed + count
                 for i = 0, count - 1 do
-                    local flow = flows[i]
-                    local density = flow.density
+                    local flow = flows and flows[i]
+                    local density = flow and flow.density or densities[i + 1]
                     density_sum = density_sum + density
                     weighted = weighted + density * (place + i)
-                    local flow_type = density > 0 and flow.type
+                    local flow_type = density > 0 and (flow and flow.type or types[i + 1])
                     if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
                         -- (a block's flows are all on the block's own level)
-                        local pos = flow.pos
-                        local x, y = pos.x, pos.y
+                        local x, y
+                        if flow then
+                            local pos = flow.pos
+                            x, y = pos.x, pos.y
+                        else
+                            x, y = xs[i + 1], ys[i + 1]
+                        end
                         local key = x + y * 4096
                         local code
                         if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
@@ -935,16 +962,28 @@ local function flows_untouched(x1, y1, x2, y2, z)
     local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
         for block_x = x1 - x1 % 16, x2, 16 do
-            local block = getTileBlock(block_x, block_y, z)
-            local flows = block and block.flows
-            if flows then
-                local count = #flows
-                local place = listed + 1
-                listed = listed + count
-                for i = 0, count - 1 do
-                    local density = flows[i].density
+            if readFlows then
+                local read = readFlows(block_x, block_y, z, block_x + 15, block_y + 15, z, READ_DENSITY, flows_read)
+                local densities = read.density
+                local place = listed
+                listed = listed + read.n
+                for i = 1, read.n do
+                    local density = densities[i]
                     density_sum = density_sum + density
                     weighted = weighted + density * (place + i)
+                end
+            else
+                local block = getTileBlock(block_x, block_y, z)
+                local flows = block and block.flows
+                if flows then
+                    local count = #flows
+                    local place = listed + 1
+                    listed = listed + count
+                    for i = 0, count - 1 do
+                        local density = flows[i].density
+                        density_sum = density_sum + density
+                        weighted = weighted + density * (place + i)
+                    end
                 end
             end
         end
