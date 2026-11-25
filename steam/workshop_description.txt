@@ -1,12 +1,12 @@
-A DFHack overlay that makes the water in graphics mode look alive. It only shows what the game itself already tracks (its waves, flows and water tiles) and changes nothing in your fort or your save.
+A DFHack overlay that makes the sea, rivers and ponds in graphics mode look alive. It only shows what the game itself already tracks (its waves, flows and water tiles) and changes nothing in your fort or your save.
 
 [h2]What it draws[/h2]
 [list]
 [*][b]Ocean waves.[/b] The game simulates waves on the sea, but graphics mode does not draw them. Here they wash up the beach and pull back, leave foam on the sand, and show as crests and spray out at sea.
 [*][b]Wet shores.[/b] Rock, pebbles, sand and grass beside the sea get a wet rim with a foam line.
 [*][b]Things in the surf.[/b] Boulders, driftwood, shrubs and saplings under a wave stand in the water.
-[*][b]Light on the water.[/b] Light patterns (caustics) move over all water, and run along with the current in rivers.
-[*][b]Ripples.[/b] Ripple rings widen on still fresh water.
+[*][b]Flowing rivers.[/b] Rivers and brooks look like they move. Light patterns on the water run along with the current, in the direction the game says the river flows.
+[*][b]Living ponds.[/b] Ponds and pools get slowly drifting light patterns, and ripple rings that widen and fade on the still water.
 [/list]
 
 [h2]Requirements[/h2]

@@ -1,12 +1,16 @@
 """Upload the built mod folder to the Steam Workshop through the running Steam client.
 
     python tools/upload_workshop.py <libsteam_api library> [mod folder] [private|friends|public|text]
+    python tools/upload_workshop.py <libsteam_api library> <mod folder> images [number to remove]
 
 Reads title, tags, key-value tags, change note and the item number from the folder's info.txt and
 the page text from steam/workshop_description.txt. Without [STEAM_FILE_ID:...] in info.txt a new
 item is created and its number is written to steam/info.txt and the folder's info.txt before the
 files go up. With 'text' only the title and page text are sent (no files, tags or visibility
-change). Visibility is set in the same update as the files (default: private). Steam must be
+change). With 'images' only the pictures are sent: steam/preview.png as the main picture and every
+file in steam/gallery/ (in name order) as a gallery picture; give the number of gallery pictures
+already on the page to have those removed first, or they stay and the new ones are added after
+them. Visibility is set in the same update as the files (default: private). Steam must be
 running and logged in to an account that owns Dwarf Fortress. Any game's copy of the library
 (libsteam_api.dylib / .so / steam_api64.dll) will do.
 """
@@ -84,7 +88,12 @@ def main():
     folder = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, 'dist', 'improved_water'))
     mode = sys.argv[3] if len(sys.argv) > 3 else 'private'
     text_only = mode == 'text'
-    visibility = None if text_only else VISIBILITY[mode]
+    images_only = mode == 'images'
+    visibility = None if text_only or images_only else VISIBILITY[mode]
+    remove = int(sys.argv[4]) if images_only and len(sys.argv) > 4 else 0
+    gallery_dir = os.path.join(ROOT, 'steam', 'gallery')
+    gallery = [os.path.join(gallery_dir, name) for name in sorted(os.listdir(gallery_dir))
+               if name.lower().endswith(('.gif', '.png', '.jpg'))] if images_only else []
     info_path = os.path.join(folder, 'info.txt')
     info = open(info_path, encoding='utf-8').read()
 
@@ -118,6 +127,10 @@ def main():
     api.SteamAPI_ISteamUGC_SetItemTags.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.POINTER(StringArray), ctypes.c_bool]
     api.SteamAPI_ISteamUGC_AddItemKeyValueTag.restype = ctypes.c_bool
     api.SteamAPI_ISteamUGC_AddItemKeyValueTag.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_char_p, ctypes.c_char_p]
+    api.SteamAPI_ISteamUGC_AddItemPreviewFile.restype = ctypes.c_bool
+    api.SteamAPI_ISteamUGC_AddItemPreviewFile.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_char_p, ctypes.c_int32]
+    api.SteamAPI_ISteamUGC_RemoveItemPreview.restype = ctypes.c_bool
+    api.SteamAPI_ISteamUGC_RemoveItemPreview.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32]
     api.SteamAPI_ISteamUGC_SubmitItemUpdate.restype = ctypes.c_uint64
     api.SteamAPI_ISteamUGC_SubmitItemUpdate.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_char_p]
     api.SteamAPI_ManualDispatch_GetAPICallResult.restype = ctypes.c_bool
@@ -146,11 +159,20 @@ def main():
         update = api.SteamAPI_ISteamUGC_StartItemUpdate(ugc, APP, file_id)
         strings = (ctypes.c_char_p * len(tags))(*[tag.encode() for tag in tags])
         array = StringArray(strings, len(tags))
-        steps = [
-            ('title', api.SteamAPI_ISteamUGC_SetItemTitle(ugc, update, title.encode())),
-            ('description', api.SteamAPI_ISteamUGC_SetItemDescription(ugc, update, description.encode())),
-        ]
-        if not text_only:
+        steps = []
+        if images_only:
+            main_picture = os.path.join(ROOT, 'steam', 'preview.png')
+            steps.append(('preview', api.SteamAPI_ISteamUGC_SetItemPreview(ugc, update, main_picture.encode())))
+            for index in range(remove):
+                steps.append(('remove picture %d' % index, api.SteamAPI_ISteamUGC_RemoveItemPreview(ugc, update, index)))
+            for path in gallery:
+                steps.append((os.path.basename(path), api.SteamAPI_ISteamUGC_AddItemPreviewFile(ugc, update, path.encode(), 0)))
+        else:
+            steps += [
+                ('title', api.SteamAPI_ISteamUGC_SetItemTitle(ugc, update, title.encode())),
+                ('description', api.SteamAPI_ISteamUGC_SetItemDescription(ugc, update, description.encode())),
+            ]
+        if not text_only and not images_only:
             steps += [
                 ('visibility', api.SteamAPI_ISteamUGC_SetItemVisibility(ugc, update, visibility)),
                 ('tags', api.SteamAPI_ISteamUGC_SetItemTags(ugc, update, ctypes.byref(array), False)),
@@ -162,9 +184,9 @@ def main():
         refused = [name for name, ok in steps if not ok]
         if refused:
             sys.exit('Steam refused: %s (item %d left as it was)' % (', '.join(refused), file_id))
-        done = wait_for(api, pipe, api.SteamAPI_ISteamUGC_SubmitItemUpdate(ugc, update, None if text_only else note.encode()), SubmitResult, 3404)
+        done = wait_for(api, pipe, api.SteamAPI_ISteamUGC_SubmitItemUpdate(ugc, update, None if text_only or images_only else note.encode()), SubmitResult, 3404)
         print('upload result', done.result, '(1 is success) | item', file_id, '| tags', ', '.join(tags),
-              '| mode', mode,
+              '| mode', mode, '| gallery pictures sent', len(gallery),
               '| Workshop agreement still to accept:', done.needs_agreement)
         if done.result != 1:
             sys.exit(1)
