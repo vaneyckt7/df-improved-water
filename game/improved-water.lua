@@ -939,6 +939,16 @@ local INDEX_KEY = {}    -- a tile's place in its block (x * 16 + y) -> what that
 for index = 0, 255 do INDEX_KEY[index] = (index >> 4) + (index & 15) * 4096 end
 local SEA_HERE = {'and', {'des.flow_size', '>', 0}, {'des.liquid_type', '==', false}}
 local SEA_BELOW = {'and', {'tt', 'in', OPEN_TYPES}, {'below.flow_size', '>', 0}, {'below.liquid_type', '==', false}}
+-- Drops the shore directions worked out for the block whose corner is given and for SHORE_RADIUS around it.
+function forget_shores(corner)
+    for dy = -SHORE_RADIUS, 15 + SHORE_RADIUS do
+        local row = corner + dy * 4096
+        for dx = -SHORE_RADIUS, 15 + SHORE_RADIUS do shore_flow[row + dx] = nil end
+    end
+end
+
+-- What a kept block adds to known_count: about as much as the tiles asked for in it, one by one, would.
+BLOCK_COUNTS_AS = 76
 function read_terrain_block(x, y, block_key, filled)
     local block = getTileBlock(x, y, level)
     local base = (x & -16) + (y & -16) * 4096
@@ -947,6 +957,18 @@ function read_terrain_block(x, y, block_key, filled)
             for index = 0, 255 do kind_now[base + INDEX_KEY[index]] = nil end
         end
         round_blocks[block_key] = false
+        -- a block that is not there is remembered as one with no sea and no land, so that the shores
+        -- around it are worked out again when it appears
+        local full = block_key + level_key
+        local was = known_blocks[full]
+        if not was then
+            known_blocks[full] = {sea = {}, land = {}, sea_n = 0, land_n = 0}
+            known_count = known_count + BLOCK_COUNTS_AS
+        elseif was.sea_n > 0 or was.land_n > 0 then
+            was.sea_n, was.land_n = 0, 0
+            shores_moved = true
+            forget_shores(base + level_key)
+        end
         return
     end
     round_blocks[block_key] = true
@@ -1001,14 +1023,10 @@ function read_terrain_block(x, y, block_key, filled)
     if same then return end
     if was then
         shores_moved = true
-        local corner = base + level_key
-        for dy = -SHORE_RADIUS, 15 + SHORE_RADIUS do
-            local row = corner + dy * 4096
-            for dx = -SHORE_RADIUS, 15 + SHORE_RADIUS do shore_flow[row + dx] = nil end
-        end
+        forget_shores(base + level_key)
         spare_block = was
     else
-        known_count = known_count + 256
+        known_count = known_count + BLOCK_COUNTS_AS
         spare_block = {sea = {}, land = {}}
     end
     now.sea_n, now.land_n = sea_n, land_n
