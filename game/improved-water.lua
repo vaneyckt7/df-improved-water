@@ -311,10 +311,10 @@ local function sea_key()
     return f.waves and 'sea'
 end
 
--- df.prepareReadFields sets up a read of chosen fields of everything in a list of game lists, done in
+-- df.prepare_read_fields sets up a read of chosen fields of everything in a list of game lists, done in
 -- one call into the game. It is not in every DFHack: without it, or with one that answers differently
 -- from the one this was written for, everything is read one field at a time, with the same result.
-local prepareRead = df.prepareReadFields
+local prepareRead = df.prepare_read_fields
 if prepareRead then
     local units = df.global.world.units.active
     local ok, read = pcall(prepareRead, units, {fields = {'_from', 'id'}})
@@ -420,7 +420,7 @@ local function water_map(vp)
     -- over the water within SMOOTH tiles), so that is looked at only when there is some.
     local any_flowing = false
     if prepareRead then
-        -- The same result without walking every tile: df.prepareReadFields' read hands back, for all the
+        -- The same result without walking every tile: df.prepare_read_fields' read hands back, for all the
         -- map blocks of one level at once, only the tiles that are seen and either hold liquid or are
         -- open with no building, which is all look() ever stops at or passes through. Below a block,
         -- the next level is read only if something in it is open.
@@ -917,7 +917,7 @@ local shores_moved = false
 -- tile of its row (0 on a boulder: no wash piece), its frame shift and its layer.
 local wash_first, wash_shift, wash_layer = {}, {}, {}
 
--- With df.prepareReadFields a tile is not asked for on its own, and its kind is not worked out here: the
+-- With df.prepare_read_fields a tile is not asked for on its own, and its kind is not worked out here: the
 -- first time a round needs a tile of a map block, the game is asked twice for that block, with the rules
 -- of classify() as the read's filter. One read gives the places of the sea tiles, the other the places and
 -- tile types of the boulders, beach and rock that are not sea; every other tile of the block is K_OTHER.
@@ -1188,7 +1188,7 @@ local found, found_count = {}, 0
 -- tell whether anything has changed.
 local PLAN_MARGIN = 2
 
--- With df.prepareReadFields (see above) the flows of all the blocks are read in one call. Each way has
+-- With df.prepare_read_fields (see above) the flows of all the blocks are read in one call. Each way has
 -- its own scan and its own check below; both list the same flows in the same order.
 local READ_SCAN = {'type', 'density', 'pos.x', 'pos.y'}
 local READ_DENSITY = {'density'}
