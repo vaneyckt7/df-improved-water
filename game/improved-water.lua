@@ -96,6 +96,7 @@ local OPEN = {}         -- tile type -> true: open space or the top of a ramp (w
 local LAND_KIND = {}    -- tile type -> its kind when there is no water in it
 local WASH_UNDER = {}   -- tile type -> true: driftwood, shrub or sapling (the game draws it above the first floor layer)
 local BUILT = {}        -- tile type -> true: a construction
+local OPEN_TYPES, LAND_TYPES = {}, {}    -- the tile types in OPEN, and those whose LAND_KIND is not K_OTHER
 do
     local attrs, shapes, materials = df.tiletype.attrs, df.tiletype_shape, df.tiletype_material
     -- Ground the wash thins out on. Rock and the sea don't stop the water.
@@ -116,6 +117,8 @@ do
                 or (shape == shapes.FLOOR and beach[material] or plant) and K_BEACH
                 or (shape == shapes.FLOOR or shape == shapes.PEBBLES) and K_ROCK
                 or K_OTHER
+            if OPEN[tiletype] then OPEN_TYPES[#OPEN_TYPES + 1] = tiletype end
+            if LAND_KIND[tiletype] ~= K_OTHER then LAND_TYPES[#LAND_TYPES + 1] = tiletype end
         end
     end
 end
@@ -914,75 +917,146 @@ local shores_moved = false
 -- tile of its row (0 on a boulder: no wash piece), its frame shift and its layer.
 local wash_first, wash_shift, wash_layer = {}, {}, {}
 
--- With df.prepareReadFields a tile is not asked for on its own: the first time a frame needs a tile of a
--- map block, the tile types and flags of the whole block, and the flags of the block below it, are read in
--- one call (round_blocks: block -> its columns, false where the map has no block). What was read is used
--- only within the frame it was read in (frame_serial, counted up by the overlay each frame): the game can
--- change a tile between frames, and a tile first asked for later in the round must be read as it is then.
-frame_serial = frame_serial or 0
-local round_blocks, blocks_for, blocks_frame, blocks_used = {}, nil, -1, 0
-local block_pool = {}
-local read_block, read_block_alone
+-- With df.prepareReadFields a tile is not asked for on its own, and its kind is not worked out here: the
+-- first time a round needs a tile of a map block, the game is asked twice for that block, with the rules
+-- of classify() as the read's filter. One read gives the places of the sea tiles, the other the places and
+-- tile types of the boulders, beach and rock that are not sea; every other tile of the block is K_OTHER.
+-- The whole block goes into kind_now at once (round_blocks: block -> true, false where the map has no
+-- block).
+-- What a block gave is kept (known_blocks, per level); when a later round gives something else, the
+-- shoreline may have moved, and the shore directions kept for the block and SHORE_RADIUS around it go.
+-- A new round does not throw kind_now away (start_terrain_round): the blocks in it that are still near
+-- the view are read again there and then, and one that gives what it gave before keeps its tiles as they
+-- are. Only a block that changed is filled in again, and one that is no longer near the view is taken out.
+known_blocks = known_blocks or {}
+local round_blocks, blocks_for = {}, nil
+local read_terrain_block
+do
+local read_sea, read_land, read_sea_alone, read_land_alone
 local block_source, block_list = {}, {}
-local function read_terrain_block(x, y, block_key)
+local spare_block = {sea = {}, land = {}}
+local INDEX_KEY = {}    -- a tile's place in its block (x * 16 + y) -> what that adds to the block's key
+for index = 0, 255 do INDEX_KEY[index] = (index >> 4) + (index & 15) * 4096 end
+local SEA_HERE = {'and', {'des.flow_size', '>', 0}, {'des.liquid_type', '==', false}}
+local SEA_BELOW = {'and', {'tt', 'in', OPEN_TYPES}, {'below.flow_size', '>', 0}, {'below.liquid_type', '==', false}}
+function read_terrain_block(x, y, block_key, filled)
     local block = getTileBlock(x, y, level)
+    local base = (x & -16) + (y & -16) * 4096
     if not block then
+        if filled then
+            for index = 0, 255 do kind_now[base + INDEX_KEY[index]] = nil end
+        end
         round_blocks[block_key] = false
-        return false
+        return
     end
-    blocks_used = blocks_used + 1
-    local columns = block_pool[blocks_used]
-    if not columns then
-        columns = {}
-        block_pool[blocks_used] = columns
-    end
+    round_blocks[block_key] = true
     local below = level > 0 and getTileBlock(x, y, level - 1)
     block_source.tt, block_source.des = block.tiletype, block.designation
     block_list[1] = block_source
+    local now = spare_block
+    local sea, land = now.sea, now.land
+    local sea_n, land_n, _
     if below then
         block_source.below = below.designation
-        if not read_block then read_block = prepareRead(block_source, {fields = {'tt', 'des', 'below'}}) end
-        read_block(block_list, columns)
+        if not read_sea then
+            local is_sea = {'or', SEA_HERE, SEA_BELOW}
+            read_sea = prepareRead(block_source, {fields = {'_index'}, where = {is_sea}})
+            read_land = prepareRead(block_source,
+                {fields = {'_index', 'tt'}, where = {{'tt', 'in', LAND_TYPES}, {'not', is_sea}}})
+        end
+        _, sea_n = read_sea(block_list, sea)
+        _, land_n = read_land(block_list, land)
     else
         block_source.below = nil
-        if not read_block_alone then read_block_alone = prepareRead(block_source, {fields = {'tt', 'des'}}) end
-        read_block_alone(block_list, columns)
+        if not read_sea_alone then
+            read_sea_alone = prepareRead(block_source, {fields = {'_index'}, where = {SEA_HERE}})
+            read_land_alone = prepareRead(block_source,
+                {fields = {'_index', 'tt'}, where = {{'tt', 'in', LAND_TYPES}, {'not', SEA_HERE}}})
+        end
+        _, sea_n = read_sea_alone(block_list, sea)
+        _, land_n = read_land_alone(block_list, land)
     end
-    columns.has_below = below and true or false
-    round_blocks[block_key] = columns
-    return columns
+    local sea_index, land_index, land_type = sea._index, land._index, land.tt
+    local full = block_key + level_key
+    local was = known_blocks[full]
+    local same = was and was.sea_n == sea_n and was.land_n == land_n
+    if same then
+        local was_index = was.sea._index
+        for i = 1, sea_n do
+            if was_index[i] ~= sea_index[i] then same = false break end
+        end
+    end
+    if same then
+        local was_index, was_type = was.land._index, was.land.tt
+        for i = 1, land_n do
+            if was_index[i] ~= land_index[i] or was_type[i] ~= land_type[i] then same = false break end
+        end
+    end
+    if same and filled then return end
+    if filled then
+        for index = 0, 255 do kind_now[base + INDEX_KEY[index]] = nil end
+    end
+    for i = 1, sea_n do kind_now[base + INDEX_KEY[sea_index[i]]] = K_SEA end
+    for i = 1, land_n do kind_now[base + INDEX_KEY[land_index[i]]] = LAND_KIND[land_type[i]] end
+    if same then return end
+    if was then
+        shores_moved = true
+        local corner = base + level_key
+        for dy = -SHORE_RADIUS, 15 + SHORE_RADIUS do
+            local row = corner + dy * 4096
+            for dx = -SHORE_RADIUS, 15 + SHORE_RADIUS do shore_flow[row + dx] = nil end
+        end
+        spare_block = was
+    else
+        known_count = known_count + 256
+        spare_block = {sea = {}, land = {}}
+    end
+    now.sea_n, now.land_n = sea_n, land_n
+    known_blocks[full] = now
+end
+
+-- How far outside the view a block is still worth keeping: the plan asks for tiles a few beside the view
+-- (PLAN_MARGIN and a neighbour), and for the sea within SHORE_RADIUS of those.
+local KEEP = SHORE_RADIUS + 4
+function start_terrain_round(x1, y1, x2, y2)
+    if not prepareRead or blocks_for ~= kind_now or known_count > KNOWN_MAX then
+        kind_now = {}
+        return
+    end
+    local bx1, by1, bx2, by2 = (x1 - KEEP) // 16, (y1 - KEEP) // 16, (x2 + KEEP) // 16, (y2 + KEEP) // 16
+    for block_key, there in pairs(round_blocks) do
+        if not there then
+            -- (nothing of it is in kind_now; it is looked for again when a tile of it is asked for)
+            round_blocks[block_key] = nil
+        else
+            local bx, by = block_key % 4096, block_key // 4096
+            if bx >= bx1 and bx <= bx2 and by >= by1 and by <= by2 then
+                read_terrain_block(bx * 16, by * 16, block_key, true)
+            else
+                local base = bx * 16 + by * 16 * 4096
+                for index = 0, 255 do kind_now[base + INDEX_KEY[index]] = nil end
+                round_blocks[block_key] = nil
+            end
+        end
+    end
+end
 end
 
 local function terrain_miss(x, y, key)
-    local tiletype, kind
     if prepareRead then
-        if blocks_for ~= kind_now or blocks_frame ~= frame_serial then
-            round_blocks, blocks_for, blocks_frame, blocks_used = {}, kind_now, frame_serial, 0
-        end
+        if blocks_for ~= kind_now then round_blocks, blocks_for = {}, kind_now end
         local block_key = x // 16 + (y // 16) * 4096
-        local columns = round_blocks[block_key]
-        if columns == nil then columns = read_terrain_block(x, y, block_key) end
-        if columns then
-            -- the same answer as classify()
-            local i = (x & 15) * 16 + (y & 15) + 1
-            tiletype = columns.tt[i]
-            local des = columns.des[i]
-            if des & D_FLOW ~= 0 and des & D_MAGMA == 0 then
-                kind = K_SEA
-            else
-                if OPEN[tiletype] and columns.has_below then
-                    des = columns.below[i]
-                    if des & D_FLOW ~= 0 and des & D_MAGMA == 0 then kind = K_SEA end
-                end
-                if not kind then kind = LAND_KIND[tiletype] end
-            end
-        else
-            kind = K_OTHER
+        if round_blocks[block_key] == nil then
+            read_terrain_block(x, y, block_key)
+            local kind = kind_now[key]
+            if kind then return kind end
         end
-    else
-        tiletype = getTileType(x, y, level)
-        kind = classify(tiletype, x, y, level)
+        -- (not kept for a tile off the map: no block would take it out of kind_now again)
+        if round_blocks[block_key] then kind_now[key] = K_OTHER end
+        return K_OTHER
     end
+    local tiletype = getTileType(x, y, level)
+    local kind = classify(tiletype, x, y, level)
     local full = key + level_key
     local was = known_kind[full]
     if was and (was ~= kind or known_type[full] ~= tiletype) then
@@ -1400,37 +1474,43 @@ local function rocks_by_the_sea(z)
         local key = x + y * 4096
         -- (the caustics also light water seen through open space further down; that is not a shore)
         if (kind_now[key] or terrain_miss(x, y, key)) == K_SEA then
-            local touches_land = false
-            for d = 1, 8 do
-                local rock_key = key - DKEY[d]
-                if land[rock_key] then touches_land = true end
-                if not seen[rock_key] then
-                    local rx, ry = x - DX[d], y - DY[d]
-                    local kind = kind_now[rock_key] or terrain_miss(rx, ry, rock_key)
-                    if kind == K_ROCK or kind == K_BEACH or kind == K_BOULDER then
-                        seen[rock_key] = true
-                        local tiletype = getTileType(rx, ry, z)
-                        if tiletype and not BUILT[tiletype] then
-                            -- The mask comes from the terrain, not from the water list: that list stops at
-                            -- the view's edge and leaves out tiles with a creature in them.
-                            local mask = 0
-                            for side = 1, 8 do
-                                local near = rock_key + DKEY[side]
-                                if (kind_now[near] or terrain_miss(rx + DX[side], ry + DY[side], near)) == K_SEA then
-                                    mask = mask + BIT[side]
+            -- Open sea, with sea on all eight sides, has no land to find. (Only what is already known is
+            -- looked at here; a side not yet classified sends the tile through the full check below.)
+            if not (kind_now[key - 4096] == K_SEA and kind_now[key + 1] == K_SEA and kind_now[key + 4096] == K_SEA
+                    and kind_now[key - 1] == K_SEA and kind_now[key - 4095] == K_SEA and kind_now[key - 4097] == K_SEA
+                    and kind_now[key + 4097] == K_SEA and kind_now[key + 4095] == K_SEA) then
+                local touches_land = false
+                for d = 1, 8 do
+                    local rock_key = key - DKEY[d]
+                    if land[rock_key] then touches_land = true end
+                    if not seen[rock_key] then
+                        local rx, ry = x - DX[d], y - DY[d]
+                        local kind = kind_now[rock_key] or terrain_miss(rx, ry, rock_key)
+                        if kind == K_ROCK or kind == K_BEACH or kind == K_BOULDER then
+                            seen[rock_key] = true
+                            local tiletype = getTileType(rx, ry, z)
+                            if tiletype and not BUILT[tiletype] then
+                                -- The mask comes from the terrain, not from the water list: that list stops at
+                                -- the view's edge and leaves out tiles with a creature in them.
+                                local mask = 0
+                                for side = 1, 8 do
+                                    local near = rock_key + DKEY[side]
+                                    if (kind_now[near] or terrain_miss(rx + DX[side], ry + DY[side], near)) == K_SEA then
+                                        mask = mask + BIT[side]
+                                    end
                                 end
+                                local n = rocks.n + 1
+                                rocks.n, rocks.x[n], rocks.y[n], rocks.mask[n] = n, rx, ry, mask
+                                land[rock_key] = true
+                                touches_land = true
                             end
-                            local n = rocks.n + 1
-                            rocks.n, rocks.x[n], rocks.y[n], rocks.mask[n] = n, rx, ry, mask
-                            land[rock_key] = true
-                            touches_land = true
                         end
                     end
                 end
-            end
-            if touches_land then
-                local n = rocks.sea_n + 1
-                rocks.sea_n, rocks.sea_x[n], rocks.sea_y[n] = n, x, y
+                if touches_land then
+                    local n = rocks.sea_n + 1
+                    rocks.sea_n, rocks.sea_x[n], rocks.sea_y[n] = n, x, y
+                end
             end
         end
     end
@@ -1667,8 +1747,11 @@ function WavesOverlay:rescan(viewport, now, tick)
     if now >= self.next_terrain_round then
         terrain_round = terrain_round + 1
         self.next_terrain_round = now + TERRAIN_RECHECK_MS
-        kind_now, wash_first, wash_shift, wash_layer = {}, {}, {}, {}
-        if known_count > KNOWN_MAX then known_kind, known_type, shore_flow, known_count = {}, {}, {}, 0 end
+        start_terrain_round(viewport.x1, viewport.y1, viewport.x2, viewport.y2)
+        wash_first, wash_shift, wash_layer = {}, {}, {}
+        if known_count > KNOWN_MAX then
+            known_kind, known_type, known_blocks, shore_flow, known_count = {}, {}, {}, {}, 0
+        end
         forget_texposes()
     end
     if z ~= level then
@@ -2012,7 +2095,6 @@ end
 function draw_frame(self, dc)
     local vp = guidm.Viewport.get()
     state.painter = painter
-    frame_serial = frame_serial + 1
     if WAVES then painter:onRenderFrame(dc, vp) end
     local t_start = os.clock()
     local water = water_map(vp)
