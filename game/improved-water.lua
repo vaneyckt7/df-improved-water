@@ -914,9 +914,70 @@ local shores_moved = false
 -- tile of its row (0 on a boulder: no wash piece), its frame shift and its layer.
 local wash_first, wash_shift, wash_layer = {}, {}, {}
 
+-- With df.prepareReadFields a tile is not asked for on its own: the first time a round needs a tile of a
+-- map block, the tile types and flags of the whole block, and the flags of the block below it, are read in
+-- one call and kept for the round (round_blocks: block -> its columns, false where the map has no block).
+local round_blocks, blocks_for, blocks_used = {}, nil, 0
+local block_pool = {}
+local read_block, read_block_alone
+local block_source, block_list = {}, {}
+local function read_terrain_block(x, y, block_key)
+    local block = getTileBlock(x, y, level)
+    if not block then
+        round_blocks[block_key] = false
+        return false
+    end
+    blocks_used = blocks_used + 1
+    local columns = block_pool[blocks_used]
+    if not columns then
+        columns = {}
+        block_pool[blocks_used] = columns
+    end
+    local below = level > 0 and getTileBlock(x, y, level - 1)
+    block_source.tt, block_source.des = block.tiletype, block.designation
+    block_list[1] = block_source
+    if below then
+        block_source.below = below.designation
+        if not read_block then read_block = prepareRead(block_source, {fields = {'tt', 'des', 'below'}}) end
+        read_block(block_list, columns)
+    else
+        block_source.below = nil
+        if not read_block_alone then read_block_alone = prepareRead(block_source, {fields = {'tt', 'des'}}) end
+        read_block_alone(block_list, columns)
+    end
+    columns.has_below = below and true or false
+    round_blocks[block_key] = columns
+    return columns
+end
+
 local function terrain_miss(x, y, key)
-    local tiletype = getTileType(x, y, level)
-    local kind = classify(tiletype, x, y, level)
+    local tiletype, kind
+    if prepareRead then
+        if blocks_for ~= kind_now then round_blocks, blocks_for, blocks_used = {}, kind_now, 0 end
+        local block_key = x // 16 + (y // 16) * 4096
+        local columns = round_blocks[block_key]
+        if columns == nil then columns = read_terrain_block(x, y, block_key) end
+        if columns then
+            -- the same answer as classify()
+            local i = (x & 15) * 16 + (y & 15) + 1
+            tiletype = columns.tt[i]
+            local des = columns.des[i]
+            if des & D_FLOW ~= 0 and des & D_MAGMA == 0 then
+                kind = K_SEA
+            else
+                if OPEN[tiletype] and columns.has_below then
+                    des = columns.below[i]
+                    if des & D_FLOW ~= 0 and des & D_MAGMA == 0 then kind = K_SEA end
+                end
+                if not kind then kind = LAND_KIND[tiletype] end
+            end
+        else
+            kind = K_OTHER
+        end
+    else
+        tiletype = getTileType(x, y, level)
+        kind = classify(tiletype, x, y, level)
+    end
     local full = key + level_key
     local was = known_kind[full]
     if was and (was ~= kind or known_type[full] ~= tiletype) then
