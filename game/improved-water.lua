@@ -369,11 +369,12 @@ local function water_map(vp)
     local same_view = state.vx1 == x1 and state.vy1 == y1 and state.vx2 == x2 and state.vy2 == y2 and state.z == z0
     -- rescan at most every 500 ms for a still view, and every 100 ms while panning (the
     -- list holds map coordinates, so a slightly stale one only misses newly exposed tiles)
-    -- (while the game is paused the water stands still: then once a second for a still view)
+    -- While the game is paused nothing on the map moves: a list made for this view at this game tick is
+    -- kept until the view moves or the game runs again.
     if state.cache then
         local age = now - state.cache_at
         if age < 100 and state.z == z0 or age < 500 and same_view
-                or age < 1000 and same_view and state.cache_tick == df.global.cur_year_tick and df.global.pause_state then
+                or same_view and state.cache_tick == df.global.cur_year_tick and df.global.pause_state then
             return state.cache
         end
     end
@@ -1990,7 +1991,11 @@ function WavesOverlay:onRenderFrame(dc, viewport)
     local view_changed = state.view_id ~= self.scan_water or z ~= self.scan_z or x1 ~= self.scan_x1
         or y1 ~= self.scan_y1 or viewport.x2 ~= self.scan_x2 or viewport.y2 ~= self.scan_y2
         or (state.cache ~= nil and state.z == z) ~= self.plan_has_water
-    if view_changed or now >= self.next_scan then
+    -- Paused, with a finished plan for this view at this game tick: nothing can have changed, so nothing
+    -- is looked at again (no flow check, no terrain round) until the view moves or the game runs again.
+    local settled = df.global.pause_state and not view_changed and tick == self.settled_tick
+        and not self.replan and not self.flows_stale
+    if not settled and (view_changed or now >= self.next_scan) then
         -- The flows are read again when the game may have changed them (see FLOW_TICKS), when the view or
         -- the caustics' water list has changed, and once per terrain round.
         if view_changed or tick // FLOW_TICKS ~= self.scan_period or self.flows_stale
@@ -2009,6 +2014,9 @@ function WavesOverlay:onRenderFrame(dc, viewport)
         -- a plan that has to be made again (the shoreline moved while planning) is made in the next frame,
         -- not a scan later: measured, after a jump of the view some rims came up to 0.2 s late
         self.next_scan = self.replan and 0 or now + RESCAN_MS
+        -- (only a look that came after the view last changed counts: the one in the frame of the change
+        -- can still run on the water list of the view before)
+        self.settled_tick = not view_changed and not self.replan and tick or nil
     end
     local any_crests = incoming > 0
     if piece_count == 0 and not any_crests then return end
