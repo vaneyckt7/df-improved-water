@@ -318,9 +318,17 @@ if readFields then
         readFields = nil
     end
 end
--- a map block's three tile grids read side by side; entry (x & 15) * 16 + (y & 15) + 1 is tile x, y
-local GRIDS = {fields = {'des', 'occ', 'tt'}}
-local grid_source, grid_pool = {}, {}
+-- Only the tiles that are seen and either hold liquid or let what lies below show through: their place in
+-- the block (x * 16 + y), both flag words and the direction a river flows there. The list of open tile types is filled in below.
+local SEEN = {fields = {'_index', 'des', 'occ', 'flow.perm_flow_dir'}, where = {
+    {'des.hidden', '==', false},
+    {'or', {'des.flow_size', '>', 0}, {'and', {'tt', 'in', {}}, {'occ.building', '==', 0}}},
+}}
+do
+    local open = SEEN.where[2][3][2][3]
+    for tiletype in pairs(OPEN) do open[#open + 1] = tiletype end
+end
+local seen_source, seen_read = {}, {}
 
 -- The visible water, grouped by what it plays: state.cache.groups[key] = {n, x, y, k, at}, with key a drift
 -- direction ('north', 'east+north' on a border), 'none' (still), 'sea' or 'wash'; k is the tile's place in
@@ -347,8 +355,7 @@ local function water_map(vp)
     local zmin = math.max(0, z0 - 4)
     local fx, fy, water, flow_tables = {}, {}, {}, {}
     -- what shows at one tile, looking down through open space
-    local look
-    look = function(x, y)
+    local function look(x, y)
         for z = z0, zmin, -1 do
             local d, occ = getFlags(x, y, z)
             if not d then return end
@@ -380,68 +387,73 @@ local function water_map(vp)
             if not tt or not OPEN[tt] or occ.whole & O_BUILDING ~= 0 then return end
         end
     end
-    -- The same look, with each map block's tiles read in one df.readFields call the first time one of
-    -- them is looked at (measured zoomed all the way out: the scan takes 20 to 45% less time).
-    if readFields then
-        local grids, used = {}, 0
-        look = function(x, y)
-            local i = (x & 15) * 16 + (y & 15) + 1
-            local column = (x >> 4) + (y >> 4) * 4096
-            for z = z0, zmin, -1 do
-                local block_key = column + z * 16777216
-                local grid = grids[block_key]
-                if grid == nil then
-                    local b = getBlock(x, y, z)
-                    if b then
-                        used = used + 1
-                        local slot = grid_pool[used]
-                        if not slot then slot = {}; grid_pool[used] = slot end
-                        grid_source.des, grid_source.occ, grid_source.tt = b.designation, b.occupancy, b.tiletype
-                        grid = readFields(grid_source, GRIDS, slot)
-                    else
-                        grid = false
-                    end
-                    grids[block_key] = grid
-                end
-                if not grid then return end
-                local des = grid.des[i]
-                if des & D_HIDDEN ~= 0 then return end
-                local taken = grid.occ[i]
-                if des & D_FLOW ~= 0 then
-                    if taken & O_BUILDING ~= 0 then return end
-                    if des & D_MAGMA == 0 then
-                        local k = (y - y1 + M) * W + (x - x1 + M)
-                        local flows = flow_tables[block_key]
-                        if flows == nil then
-                            local b = getBlock(x, y, z)
-                            flows = b and b.liquid_flow or false
-                            flow_tables[block_key] = flows
-                        end
-                        local dir = flows and flows[x & 15][y & 15].perm_flow_dir
-                        local flowing = dir and FLOWING[dir]
-                        water[k] = taken & O_UNIT ~= 0 and 3 or (flowing and 1 or (sea and des & D_SALT ~= 0) and 4 or 2)
-                        if flowing and FLOW_FX[dir] then fx[k], fy[k] = FLOW_FX[dir], FLOW_FY[dir] end
-                    end
-                    return
-                end
-                if not OPEN[grid.tt[i]] or taken & O_BUILDING ~= 0 then return end
-            end
-        end
-    end
     -- The view and one tile around it. Only flowing water needs the wider margin (its drift is averaged
     -- over the water within SMOOTH tiles), so that is looked at only when there is some.
     local any_flowing = false
-    for y = y1 - 1, y2 + 1 do
-        for x = x1 - 1, x2 + 1 do
-            look(x, y)
-            if water[(y - y1 + M) * W + (x - x1 + M)] == 1 then any_flowing = true end
+    if readFields then
+        -- The same result without walking every tile: for each map block, df.readFields hands back only
+        -- the tiles that are seen and either hold liquid or are open with no building, which is all
+        -- look() ever stops at or passes through. Lower levels are read only where something above is open.
+        -- the rectangle ax1..ay2, leaving out the rectangle ix1..iy2 when given
+        local function scan(ax1, ay1, ax2, ay2, ix1, iy1, ix2, iy2)
+            for block_y = ay1 - ay1 % 16, ay2, 16 do
+                for block_x = ax1 - ax1 % 16, ax2, 16 do
+                    local open    -- place in the block -> true: every level so far is open there
+                    for z = z0, zmin, -1 do
+                        local b = getBlock(block_x, block_y, z)
+                        if not b then break end
+                        seen_source.des, seen_source.occ, seen_source.tt, seen_source.flow =
+                            b.designation, b.occupancy, b.tiletype, b.liquid_flow
+                        local seen, count = readFields(seen_source, SEEN, seen_read)
+                        local index, deses, occs, dirs = seen._index, seen.des, seen.occ, seen['flow.perm_flow_dir']
+                        local open_here
+                        for n = 1, count do
+                            local i = index[n]
+                            if not open or open[i] then
+                                local des = deses[n]
+                                if des & D_FLOW == 0 then
+                                    if not open_here then open_here = {} end
+                                    open_here[i] = true
+                                else
+                                    local x, y = block_x + (i >> 4), block_y + (i & 15)
+                                    local taken = occs[n]
+                                    if x >= ax1 and x <= ax2 and y >= ay1 and y <= ay2
+                                            and not (ix1 and x >= ix1 and x <= ix2 and y >= iy1 and y <= iy2)
+                                            and taken & O_BUILDING == 0 and des & D_MAGMA == 0 then
+                                        local k = (y - y1 + M) * W + (x - x1 + M)
+                                        local dir = dirs[n]
+                                        local flowing = FLOWING[dir]
+                                        water[k] = taken & O_UNIT ~= 0 and 3
+                                            or (flowing and 1 or (sea and des & D_SALT ~= 0) and 4 or 2)
+                                        if flowing then
+                                            any_flowing = true
+                                            if FLOW_FX[dir] then fx[k], fy[k] = FLOW_FX[dir], FLOW_FY[dir] end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        if not open_here then break end
+                        open = open_here
+                    end
+                end
+            end
         end
-    end
-    if any_flowing then
-        for y = y1 - M, y2 + M do
-            local inside = y >= y1 - 1 and y <= y2 + 1
-            for x = x1 - M, x2 + M do
-                if not (inside and x >= x1 - 1 and x <= x2 + 1) then look(x, y) end
+        scan(x1 - 1, y1 - 1, x2 + 1, y2 + 1)
+        if any_flowing then scan(x1 - M, y1 - M, x2 + M, y2 + M, x1 - 1, y1 - 1, x2 + 1, y2 + 1) end
+    else
+        for y = y1 - 1, y2 + 1 do
+            for x = x1 - 1, x2 + 1 do
+                look(x, y)
+                if water[(y - y1 + M) * W + (x - x1 + M)] == 1 then any_flowing = true end
+            end
+        end
+        if any_flowing then
+            for y = y1 - M, y2 + M do
+                local inside = y >= y1 - 1 and y <= y2 + 1
+                for x = x1 - M, x2 + M do
+                    if not (inside and x >= x1 - 1 and x <= x2 + 1) then look(x, y) end
+                end
             end
         end
     end
