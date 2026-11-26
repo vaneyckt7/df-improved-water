@@ -370,11 +370,15 @@ local function water_map(vp)
     -- rescan at most every 500 ms for a still view, and every 100 ms while panning (the
     -- list holds map coordinates, so a slightly stale one only misses newly exposed tiles)
     -- While the game is paused nothing on the map moves: a list made for this view at this game tick is
-    -- kept until the view moves or the game runs again.
+    -- kept until the view moves or the game runs again. Two things can still change it then: the player
+    -- placing or cancelling a building (a planned one covers its tiles at once), which changes the number
+    -- of buildings, and another fort being loaded, which changes the site or the year.
     if state.cache then
         local age = now - state.cache_at
         if age < 100 and state.z == z0 or age < 500 and same_view
-                or same_view and state.cache_tick == df.global.cur_year_tick and df.global.pause_state then
+                or same_view and state.cache_tick == df.global.cur_year_tick and df.global.pause_state
+                    and state.cache_builds == #df.global.world.buildings.all
+                    and state.cache_site == df.global.plotinfo.site_id and state.cache_year == df.global.cur_year then
             return state.cache
         end
     end
@@ -666,6 +670,7 @@ local function water_map(vp)
     state.vx1, state.vy1, state.vx2, state.vy2 = x1, y1, x2, y2
     state.cache, state.cache_at, state.z = cache, now, z0
     state.cache_tick = df.global.cur_year_tick
+    state.cache_builds, state.cache_site, state.cache_year = #df.global.world.buildings.all, df.global.plotinfo.site_id, df.global.cur_year
     return cache
 end
 
@@ -1764,6 +1769,7 @@ function WavesOverlay:rescan(viewport, now, tick)
     local started = dfhack.getTickCount()
     local z = viewport.z
     if now >= self.next_terrain_round then
+        self.round_tick, self.round_water = tick, state.cache_at
         terrain_round = terrain_round + 1
         self.next_terrain_round = now + TERRAIN_RECHECK_MS
         start_terrain_round(viewport.x1, viewport.y1, viewport.x2, viewport.y2)
@@ -1993,9 +1999,20 @@ function WavesOverlay:onRenderFrame(dc, viewport)
         or (state.cache ~= nil and state.z == z) ~= self.plan_has_water
     -- Paused, with a finished plan for this view at this game tick: nothing can have changed, so nothing
     -- is looked at again (no flow check, no terrain round) until the view moves or the game runs again.
-    local settled = df.global.pause_state and not view_changed and tick == self.settled_tick
-        and not self.replan and not self.flows_stale
+    -- The plan counts as finished only when its terrain round started at this tick and with the caustics'
+    -- water list as it is now (the rim along the sea comes from that list, once per round); until then a
+    -- paused game gets a round at the next look instead of waiting for the next one due. The water list
+    -- is made again when a building is placed or cancelled or another fort is loaded (see water_map), so
+    -- that undoes it too.
+    local paused = df.global.pause_state
+    local settled = paused and not view_changed and tick == self.settled_tick
+        and self.round_water == state.cache_at and not self.replan and not self.flows_stale
     if not settled and (view_changed or now >= self.next_scan) then
+        local fresh = self.round_tick == tick and self.round_water == state.cache_at
+            and (state.cache == nil or state.cache_tick == tick)
+        if paused and not fresh and (state.cache == nil or state.cache_tick == tick) then
+            self.next_terrain_round = 0
+        end
         -- The flows are read again when the game may have changed them (see FLOW_TICKS), when the view or
         -- the caustics' water list has changed, and once per terrain round.
         if view_changed or tick // FLOW_TICKS ~= self.scan_period or self.flows_stale
@@ -2016,7 +2033,8 @@ function WavesOverlay:onRenderFrame(dc, viewport)
         self.next_scan = self.replan and 0 or now + RESCAN_MS
         -- (only a look that came after the view last changed counts: the one in the frame of the change
         -- can still run on the water list of the view before)
-        self.settled_tick = not view_changed and not self.replan and tick or nil
+        self.settled_tick = not view_changed and not self.replan and self.round_tick == tick
+            and self.round_water == state.cache_at and (state.cache == nil or state.cache_tick == tick) and tick or nil
     end
     local any_crests = incoming > 0
     if piece_count == 0 and not any_crests then return end
