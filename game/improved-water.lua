@@ -339,6 +339,9 @@ local read_seen
 -- block its corner and the places in it where every level so far is open (false: all of them)
 local seen_list, seen_sources, seen_read = {}, {}, {}
 local scan_x, scan_y, scan_open, next_open = {}, {}, {}, {}
+-- the read of the dense waves for the wash (set up again when SEA_WASH changes), and its lists
+local read_wash, wash_read_for
+local wash_lists, wash_read = {}, {}
 
 -- The visible water, grouped by what it plays: state.cache.groups[key] = {n, x, y, k, at}, with key a drift
 -- direction ('north', 'east+north' on a border), 'none' (still), 'sea' or 'wash'; k is the tile's place in
@@ -585,6 +588,31 @@ local function water_map(vp)
             local wx, wy, density = sw.x, sw.y, sw.density
             for i = 1, sw.n do
                 if density[i] >= SEA_WASH then wash(wx[i], wy[i]) end
+            end
+        elseif prepareRead then
+            -- one call for the wave flows of every block: only the dense enough waves come back
+            local lists = 0
+            for by = y1 - y1 % 16, y2, 16 do
+                for bx = x1 - x1 % 16, x2, 16 do
+                    local block = getBlock(bx, by, z0)
+                    if block then
+                        lists = lists + 1
+                        wash_lists[lists] = block.flows
+                    end
+                end
+            end
+            for i = #wash_lists, lists + 1, -1 do wash_lists[i] = nil end
+            if lists > 0 then
+                if wash_read_for ~= SEA_WASH then
+                    read_wash = prepareRead(wash_lists[1], {fields = {'pos.x', 'pos.y', 'pos.z'}, where = {
+                        {'type', '==', df.flow_type.OceanWave}, {'density', '>=', SEA_WASH}}})
+                    wash_read_for = SEA_WASH
+                end
+                local read, count = read_wash(wash_lists, wash_read)
+                local xs, ys, zs = read['pos.x'], read['pos.y'], read['pos.z']
+                for i = 1, count do
+                    if zs[i] == z0 then wash(xs[i], ys[i]) end
+                end
             end
         else
             local WAVE = df.flow_type.OceanWave
@@ -967,6 +995,14 @@ local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 -- one number per flow found (what it is, where, its stage), to tell whether anything has changed
 local found, found_count = {}, 0
 
+-- The game keeps flows per map block, so a scan reads every block the view touches: up to 15 tiles past
+-- each edge of it. Only the flows within PLAN_MARGIN tiles of the view are listed for planning. Nothing
+-- farther away can change a piece inside the view: a rim comes from a wave beside it (1 tile), or from a
+-- boulder beside it that has a wave beside that (2 tiles). Foam farther away is still remembered (its
+-- stage counts from the density it was first seen at), and all the flows still count in the sums that
+-- tell whether anything has changed.
+local PLAN_MARGIN = 2
+
 -- With df.prepareReadFields (see above) the flows of all the blocks are read in one call. Each way has
 -- its own scan and its own check below; both list the same flows in the same order.
 local READ_SCAN = {fields = {'type', 'density', 'pos.x', 'pos.y'}}
@@ -999,6 +1035,7 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     local OceanWave, SeaFoam, Steam = df.flow_type.OceanWave, df.flow_type.SeaFoam, df.flow_type.Steam
     local zkey = z * 16777216
     local waves, foams, sprays, n, same = 0, 0, 0, 0, true
+    local near_x1, near_y1, near_x2, near_y2 = x1 - PLAN_MARGIN, y1 - PLAN_MARGIN, x2 + PLAN_MARGIN, y2 + PLAN_MARGIN
     local remembered = 0
     local listed, density_sum, weighted = 0, 0, 0
     for block_y = y1 - y1 % 16, y2, 16 do
@@ -1021,17 +1058,23 @@ local function find_flows(x1, y1, x2, y2, z, tick)
                         local pos = flow.pos
                         local x, y = pos.x, pos.y
                         local key = x + y * 4096
+                        -- (only what is near the view is planned; see PLAN_MARGIN)
+                        local near = x >= near_x1 and x <= near_x2 and y >= near_y1 and y <= near_y2
                         local code
                         if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
-                            waves = waves + 1
-                            wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
-                            code = key
+                            if near then
+                                waves = waves + 1
+                                wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
+                                code = key
+                            end
                         elseif flow_type == Steam then
-                            local stage = density * FOAM_STAGES // SPRAY_FULL
-                            if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
-                            sprays = sprays + 1
-                            spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
-                            code = key + 33554432 + stage * 67108864
+                            if near then
+                                local stage = density * FOAM_STAGES // SPRAY_FULL
+                                if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                                sprays = sprays + 1
+                                spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
+                                code = key + 33554432 + stage * 67108864
+                            end
                         else
                             local stage
                             if flow_type == OceanWave then
@@ -1051,14 +1094,18 @@ local function find_flows(x1, y1, x2, y2, z, tick)
                                 if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
                                 if stage < 0 then stage = 0 end
                             end
-                            foams = foams + 1
-                            foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
-                            code = key + 16777216 + stage * 67108864
+                            if near then
+                                foams = foams + 1
+                                foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
+                                code = key + 16777216 + stage * 67108864
+                            end
                         end
-                        n = n + 1
-                        if found[n] ~= code then
-                            found[n] = code
-                            same = false
+                        if code then
+                            n = n + 1
+                            if found[n] ~= code then
+                                found[n] = code
+                                same = false
+                            end
                         end
                     end
                 end
@@ -1079,6 +1126,7 @@ local function find_flows_read(x1, y1, x2, y2, z, tick)
     local OceanWave, SeaFoam, Steam = df.flow_type.OceanWave, df.flow_type.SeaFoam, df.flow_type.Steam
     local zkey = z * 16777216
     local waves, foams, sprays, n, same = 0, 0, 0, 0, true
+    local near_x1, near_y1, near_x2, near_y2 = x1 - PLAN_MARGIN, y1 - PLAN_MARGIN, x2 + PLAN_MARGIN, y2 + PLAN_MARGIN
     local remembered = 0
     local listed, density_sum, weighted = 0, 0, 0
     if list_flows(x1, y1, x2, y2, z) > 0 then
@@ -1095,17 +1143,23 @@ local function find_flows_read(x1, y1, x2, y2, z, tick)
             if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
                 local x, y = xs[i], ys[i]
                 local key = x + y * 4096
+                -- (only what is near the view is planned; see PLAN_MARGIN)
+                local near = x >= near_x1 and x <= near_x2 and y >= near_y1 and y <= near_y2
                 local code
                 if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
-                    waves = waves + 1
-                    wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
-                    code = key
+                    if near then
+                        waves = waves + 1
+                        wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
+                        code = key
+                    end
                 elseif flow_type == Steam then
-                    local stage = density * FOAM_STAGES // SPRAY_FULL
-                    if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
-                    sprays = sprays + 1
-                    spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
-                    code = key + 33554432 + stage * 67108864
+                    if near then
+                        local stage = density * FOAM_STAGES // SPRAY_FULL
+                        if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                        sprays = sprays + 1
+                        spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
+                        code = key + 33554432 + stage * 67108864
+                    end
                 else
                     local stage
                     if flow_type == OceanWave then
@@ -1125,14 +1179,18 @@ local function find_flows_read(x1, y1, x2, y2, z, tick)
                         if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
                         if stage < 0 then stage = 0 end
                     end
-                    foams = foams + 1
-                    foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
-                    code = key + 16777216 + stage * 67108864
+                    if near then
+                        foams = foams + 1
+                        foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
+                        code = key + 16777216 + stage * 67108864
+                    end
                 end
-                n = n + 1
-                if found[n] ~= code then
-                    found[n] = code
-                    same = false
+                if code then
+                    n = n + 1
+                    if found[n] ~= code then
+                        found[n] = code
+                        same = false
+                    end
                 end
             end
         end
