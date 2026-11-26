@@ -914,10 +914,13 @@ local shores_moved = false
 -- tile of its row (0 on a boulder: no wash piece), its frame shift and its layer.
 local wash_first, wash_shift, wash_layer = {}, {}, {}
 
--- With df.prepareReadFields a tile is not asked for on its own: the first time a round needs a tile of a
+-- With df.prepareReadFields a tile is not asked for on its own: the first time a frame needs a tile of a
 -- map block, the tile types and flags of the whole block, and the flags of the block below it, are read in
--- one call and kept for the round (round_blocks: block -> its columns, false where the map has no block).
-local round_blocks, blocks_for, blocks_used = {}, nil, 0
+-- one call (round_blocks: block -> its columns, false where the map has no block). What was read is used
+-- only within the frame it was read in (frame_serial, counted up by the overlay each frame): the game can
+-- change a tile between frames, and a tile first asked for later in the round must be read as it is then.
+frame_serial = frame_serial or 0
+local round_blocks, blocks_for, blocks_frame, blocks_used = {}, nil, -1, 0
 local block_pool = {}
 local read_block, read_block_alone
 local block_source, block_list = {}, {}
@@ -953,7 +956,9 @@ end
 local function terrain_miss(x, y, key)
     local tiletype, kind
     if prepareRead then
-        if blocks_for ~= kind_now then round_blocks, blocks_for, blocks_used = {}, kind_now, 0 end
+        if blocks_for ~= kind_now or blocks_frame ~= frame_serial then
+            round_blocks, blocks_for, blocks_frame, blocks_used = {}, kind_now, frame_serial, 0
+        end
         local block_key = x // 16 + (y // 16) * 4096
         local columns = round_blocks[block_key]
         if columns == nil then columns = read_terrain_block(x, y, block_key) end
@@ -2007,6 +2012,7 @@ end
 function draw_frame(self, dc)
     local vp = guidm.Viewport.get()
     state.painter = painter
+    frame_serial = frame_serial + 1
     if WAVES then painter:onRenderFrame(dc, vp) end
     local t_start = os.clock()
     local water = water_map(vp)
