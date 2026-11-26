@@ -308,19 +308,24 @@ local function sea_key()
     return f.waves and 'sea'
 end
 
--- df.readFields reads chosen fields of everything in a game list in one call into the game. It is not in
--- every DFHack: without it, or with one that answers differently from the one this was written for,
--- everything is read one field at a time, with the same result.
-local readFields = df.readFields
-if readFields then
-    local ok, read, count = pcall(readFields, df.global.world.units.active, {fields = {'id'}}, {})
-    if not (ok and type(read) == 'table' and type(count) == 'number' and type(read.id) == 'table') then
-        readFields = nil
+-- df.prepareReadFields sets up a read of chosen fields of everything in a list of game lists, done in
+-- one call into the game. It is not in every DFHack: without it, or with one that answers differently
+-- from the one this was written for, everything is read one field at a time, with the same result.
+local prepareRead = df.prepareReadFields
+if prepareRead then
+    local units = df.global.world.units.active
+    local ok, read = pcall(prepareRead, units, {fields = {'_from', 'id'}})
+    local out, count
+    if ok and type(read) == 'function' then ok, out, count = pcall(read, {units, units}, {}) end
+    if not (ok and type(out) == 'table' and type(count) == 'number' and type(out.id) == 'table'
+            and type(out._from) == 'table' and count == 2 * #units) then
+        prepareRead = nil
     end
 end
 -- Only the tiles that are seen and either hold liquid or let what lies below show through: their place in
--- the block (x * 16 + y), both flag words and the direction a river flows there. The list of open tile types is filled in below.
-local SEEN = {fields = {'_index', 'des', 'occ', 'flow.perm_flow_dir'}, where = {
+-- the block (x * 16 + y), both flag words and the direction a river flows there. The list of open tile
+-- types is filled in below. Many blocks are read in one call; _from is the block's place in that list.
+local SEEN = {fields = {'_from', '_index', 'des', 'occ', 'flow.perm_flow_dir'}, where = {
     {'des.hidden', '==', false},
     {'or', {'des.flow_size', '>', 0}, {'and', {'tt', 'in', {}}, {'occ.building', '==', 0}}},
 }}
@@ -328,7 +333,12 @@ do
     local open = SEEN.where[2][3][2][3]
     for tiletype in pairs(OPEN) do open[#open + 1] = tiletype end
 end
-local seen_source, seen_read = {}, {}
+-- the read itself, set up at the first scan (it needs a map block to see what it will be reading)
+local read_seen
+-- the blocks one call reads (each a table of its four grids), what the call returned, and for each
+-- block its corner and the places in it where every level so far is open (false: all of them)
+local seen_list, seen_sources, seen_read = {}, {}, {}
+local scan_x, scan_y, scan_open, next_open = {}, {}, {}, {}
 
 -- The visible water, grouped by what it plays: state.cache.groups[key] = {n, x, y, k, at}, with key a drift
 -- direction ('north', 'east+north' on a border), 'none' (still), 'sea' or 'wash'; k is the tile's place in
@@ -390,53 +400,91 @@ local function water_map(vp)
     -- The view and one tile around it. Only flowing water needs the wider margin (its drift is averaged
     -- over the water within SMOOTH tiles), so that is looked at only when there is some.
     local any_flowing = false
-    if readFields then
-        -- The same result without walking every tile: for each map block, df.readFields hands back only
-        -- the tiles that are seen and either hold liquid or are open with no building, which is all
-        -- look() ever stops at or passes through. Lower levels are read only where something above is open.
+    if prepareRead then
+        -- The same result without walking every tile: df.prepareReadFields' read hands back, for all the
+        -- map blocks of one level at once, only the tiles that are seen and either hold liquid or are
+        -- open with no building, which is all look() ever stops at or passes through. Below a block,
+        -- the next level is read only if something in it is open.
         -- the rectangle ax1..ay2, leaving out the rectangle ix1..iy2 when given
         local function scan(ax1, ay1, ax2, ay2, ix1, iy1, ix2, iy2)
+            local blocks = 0
             for block_y = ay1 - ay1 % 16, ay2, 16 do
                 for block_x = ax1 - ax1 % 16, ax2, 16 do
-                    local open    -- place in the block -> true: every level so far is open there
-                    for z = z0, zmin, -1 do
-                        local b = getBlock(block_x, block_y, z)
-                        if not b then break end
-                        seen_source.des, seen_source.occ, seen_source.tt, seen_source.flow =
+                    blocks = blocks + 1
+                    scan_x[blocks], scan_y[blocks], scan_open[blocks] = block_x, block_y, false
+                end
+            end
+            for z = z0, zmin, -1 do
+                -- the blocks still being looked down through that exist on this level
+                local reading = 0
+                for j = 1, blocks do
+                    local b = getBlock(scan_x[j], scan_y[j], z)
+                    if b then
+                        reading = reading + 1
+                        local source = seen_sources[reading]
+                        if not source then
+                            source = {}
+                            seen_sources[reading] = source
+                        end
+                        source.des, source.occ, source.tt, source.flow =
                             b.designation, b.occupancy, b.tiletype, b.liquid_flow
-                        local seen, count = readFields(seen_source, SEEN, seen_read)
-                        local index, deses, occs, dirs = seen._index, seen.des, seen.occ, seen['flow.perm_flow_dir']
-                        local open_here
-                        for n = 1, count do
-                            local i = index[n]
-                            if not open or open[i] then
-                                local des = deses[n]
-                                if des & D_FLOW == 0 then
-                                    if not open_here then open_here = {} end
-                                    open_here[i] = true
-                                else
-                                    local x, y = block_x + (i >> 4), block_y + (i & 15)
-                                    local taken = occs[n]
-                                    if x >= ax1 and x <= ax2 and y >= ay1 and y <= ay2
-                                            and not (ix1 and x >= ix1 and x <= ix2 and y >= iy1 and y <= iy2)
-                                            and taken & O_BUILDING == 0 and des & D_MAGMA == 0 then
-                                        local k = (y - y1 + M) * W + (x - x1 + M)
-                                        local dir = dirs[n]
-                                        local flowing = FLOWING[dir]
-                                        water[k] = taken & O_UNIT ~= 0 and 3
-                                            or (flowing and 1 or (sea and des & D_SALT ~= 0) and 4 or 2)
-                                        if flowing then
-                                            any_flowing = true
-                                            if FLOW_FX[dir] then fx[k], fy[k] = FLOW_FX[dir], FLOW_FY[dir] end
-                                        end
-                                    end
+                        seen_list[reading] = source
+                        scan_x[reading], scan_y[reading], scan_open[reading] = scan_x[j], scan_y[j], scan_open[j]
+                        next_open[reading] = false
+                    end
+                end
+                for j = #seen_list, reading + 1, -1 do seen_list[j] = nil end
+                if reading == 0 then break end
+                if not read_seen then read_seen = prepareRead(seen_list[1], SEEN) end
+                local seen, count = read_seen(seen_list, seen_read)
+                local from, index, deses, occs, dirs =
+                    seen._from, seen._index, seen.des, seen.occ, seen['flow.perm_flow_dir']
+                local at, block_x, block_y = 0
+                local open          -- place in the block -> true: every level so far is open there
+                local open_here
+                for n = 1, count do
+                    local block = from[n]
+                    if block ~= at then
+                        if at > 0 then next_open[at] = open_here end
+                        at = block
+                        block_x, block_y, open, open_here = scan_x[block], scan_y[block], scan_open[block], false
+                    end
+                    local i = index[n]
+                    if not open or open[i] then
+                        local des = deses[n]
+                        if des & D_FLOW == 0 then
+                            if not open_here then open_here = {} end
+                            open_here[i] = true
+                        else
+                            local x, y = block_x + (i >> 4), block_y + (i & 15)
+                            local taken = occs[n]
+                            if x >= ax1 and x <= ax2 and y >= ay1 and y <= ay2
+                                    and not (ix1 and x >= ix1 and x <= ix2 and y >= iy1 and y <= iy2)
+                                    and taken & O_BUILDING == 0 and des & D_MAGMA == 0 then
+                                local k = (y - y1 + M) * W + (x - x1 + M)
+                                local dir = dirs[n]
+                                local flowing = FLOWING[dir]
+                                water[k] = taken & O_UNIT ~= 0 and 3
+                                    or (flowing and 1 or (sea and des & D_SALT ~= 0) and 4 or 2)
+                                if flowing then
+                                    any_flowing = true
+                                    if FLOW_FX[dir] then fx[k], fy[k] = FLOW_FX[dir], FLOW_FY[dir] end
                                 end
                             end
                         end
-                        if not open_here then break end
-                        open = open_here
                     end
                 end
+                if at > 0 then next_open[at] = open_here end
+                -- carry on below the blocks that have something open
+                blocks = 0
+                for j = 1, reading do
+                    local open_below = next_open[j]
+                    if open_below then
+                        blocks = blocks + 1
+                        scan_x[blocks], scan_y[blocks], scan_open[blocks] = scan_x[j], scan_y[j], open_below
+                    end
+                end
+                if blocks == 0 then break end
             end
         end
         scan(x1 - 1, y1 - 1, x2 + 1, y2 + 1)
@@ -919,12 +967,30 @@ local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 -- one number per flow found (what it is, where, its stage), to tell whether anything has changed
 local found, found_count = {}, 0
 
--- With df.readFields (see above) a block's flows are read in one call (measured: a scan in about a
--- third of the time, the densities alone in a quarter). Each way has its own scan and its own check
--- below; both list the same flows in the same order.
+-- With df.prepareReadFields (see above) the flows of all the blocks are read in one call. Each way has
+-- its own scan and its own check below; both list the same flows in the same order.
 local READ_SCAN = {fields = {'type', 'density', 'pos.x', 'pos.y'}}
 local READ_DENSITY = {fields = {'density'}}
-local flows_read = {}
+-- the two reads, set up when first used (that needs a map block's list of flows)
+local read_scan, read_density
+local flow_lists, flows_read = {}, {}
+
+-- Lists the flows of the map blocks on level z that the rectangle touches, in flow_lists. Returns
+-- how many blocks that is.
+local function list_flows(x1, y1, x2, y2, z)
+    local lists = 0
+    for block_y = y1 - y1 % 16, y2, 16 do
+        for block_x = x1 - x1 % 16, x2, 16 do
+            local block = getTileBlock(block_x, block_y, z)
+            if block then
+                lists = lists + 1
+                flow_lists[lists] = block.flows
+            end
+        end
+    end
+    for i = #flow_lists, lists + 1, -1 do flow_lists[i] = nil end
+    return lists
+end
 
 -- Reads the wave, foam and spray flows on level z in the map blocks that the rectangle touches. Each
 -- field read from a flow is a call into the game, so each is read once. Returns whether the flows are
@@ -1008,70 +1074,65 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     return same
 end
 
--- The same scan, reading each block's flows with one df.readFields call.
+-- The same scan, reading the flows of every block in one call.
 local function find_flows_read(x1, y1, x2, y2, z, tick)
     local OceanWave, SeaFoam, Steam = df.flow_type.OceanWave, df.flow_type.SeaFoam, df.flow_type.Steam
     local zkey = z * 16777216
     local waves, foams, sprays, n, same = 0, 0, 0, 0, true
     local remembered = 0
     local listed, density_sum, weighted = 0, 0, 0
-    for block_y = y1 - y1 % 16, y2, 16 do
-        for block_x = x1 - x1 % 16, x2, 16 do
-            local block = getTileBlock(block_x, block_y, z)
-            local read, count
-            if block then read, count = readFields(block.flows, READ_SCAN, flows_read) end
-            if block and count > 0 then
-                local types, densities, xs, ys = read.type, read.density, read['pos.x'], read['pos.y']
-                local place = listed
-                listed = listed + count
-                for i = 1, count do
-                    local density = densities[i]
-                    density_sum = density_sum + density
-                    weighted = weighted + density * (place + i)
-                    local flow_type = density > 0 and types[i]
-                    if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
-                        local x, y = xs[i], ys[i]
-                        local key = x + y * 4096
-                        local code
-                        if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
-                            waves = waves + 1
-                            wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
-                            code = key
-                        elseif flow_type == Steam then
-                            local stage = density * FOAM_STAGES // SPRAY_FULL
-                            if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
-                            sprays = sprays + 1
-                            spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
-                            code = key + 33554432 + stage * 67108864
-                        else
-                            local stage
-                            if flow_type == OceanWave then
-                                -- the wave's last thin water, broken up into foam
-                                stage = density * FOAM_STAGES // WAVE_FOAM_BELOW
-                            else
-                                local full = key + zkey
-                                local born = foam_density[full]
-                                if not born or density > born then
-                                    born = density
-                                    foam_density[full] = born
-                                end
-                                foam_seen[full] = tick
-                                remembered = remembered + 1
-                                foam_full[remembered] = full
-                                stage = math.floor(density / born * FOAM_STAGES)
-                                if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
-                                if stage < 0 then stage = 0 end
-                            end
-                            foams = foams + 1
-                            foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
-                            code = key + 16777216 + stage * 67108864
+    if list_flows(x1, y1, x2, y2, z) > 0 then
+        if not read_scan then read_scan = prepareRead(flow_lists[1], READ_SCAN) end
+        local read, count = read_scan(flow_lists, flows_read)
+        local types, densities, xs, ys = read.type, read.density, read['pos.x'], read['pos.y']
+        local place = listed
+        listed = listed + count
+        for i = 1, count do
+            local density = densities[i]
+            density_sum = density_sum + density
+            weighted = weighted + density * (place + i)
+            local flow_type = density > 0 and types[i]
+            if flow_type == OceanWave or flow_type == SeaFoam or flow_type == Steam then
+                local x, y = xs[i], ys[i]
+                local key = x + y * 4096
+                local code
+                if flow_type == OceanWave and density >= WAVE_FOAM_BELOW then
+                    waves = waves + 1
+                    wave_x[waves], wave_y[waves], wave_key[waves], wave_density[waves] = x, y, key, density
+                    code = key
+                elseif flow_type == Steam then
+                    local stage = density * FOAM_STAGES // SPRAY_FULL
+                    if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                    sprays = sprays + 1
+                    spray_x[sprays], spray_y[sprays], spray_stage[sprays] = x, y, stage
+                    code = key + 33554432 + stage * 67108864
+                else
+                    local stage
+                    if flow_type == OceanWave then
+                        -- the wave's last thin water, broken up into foam
+                        stage = density * FOAM_STAGES // WAVE_FOAM_BELOW
+                    else
+                        local full = key + zkey
+                        local born = foam_density[full]
+                        if not born or density > born then
+                            born = density
+                            foam_density[full] = born
                         end
-                        n = n + 1
-                        if found[n] ~= code then
-                            found[n] = code
-                            same = false
-                        end
+                        foam_seen[full] = tick
+                        remembered = remembered + 1
+                        foam_full[remembered] = full
+                        stage = math.floor(density / born * FOAM_STAGES)
+                        if stage > FOAM_STAGES - 1 then stage = FOAM_STAGES - 1 end
+                        if stage < 0 then stage = 0 end
                     end
+                    foams = foams + 1
+                    foam_x[foams], foam_y[foams], foam_stage[foams] = x, y, stage
+                    code = key + 16777216 + stage * 67108864
+                end
+                n = n + 1
+                if found[n] ~= code then
+                    found[n] = code
+                    same = false
                 end
             end
         end
@@ -1084,7 +1145,7 @@ local function find_flows_read(x1, y1, x2, y2, z, tick)
     seen_waves.x1, seen_waves.y1, seen_waves.x2, seen_waves.y2 = x1, y1, x2, y2
     return same
 end
-if readFields then find_flows = find_flows_read end
+if prepareRead then find_flows = find_flows_read end
 
 -- Between the game's own flow updates (see FLOW_TICKS) a flow can still start: steam where magma meets
 -- water, on any tick. The game then adds a flow, or brings a spent one back to full, or tops one up: each
@@ -1112,28 +1173,23 @@ local function flows_untouched(x1, y1, x2, y2, z)
     return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
 end
 
--- The same check with df.readFields.
+-- The same check, reading the densities of every block in one call.
 local function flows_untouched_read(x1, y1, x2, y2, z)
     local listed, density_sum, weighted = 0, 0, 0
-    for block_y = y1 - y1 % 16, y2, 16 do
-        for block_x = x1 - x1 % 16, x2, 16 do
-            local block = getTileBlock(block_x, block_y, z)
-            if block then
-                local read, count = readFields(block.flows, READ_DENSITY, flows_read)
-                local densities = read.density
-                local place = listed
-                listed = listed + count
-                for i = 1, count do
-                    local density = densities[i]
-                    density_sum = density_sum + density
-                    weighted = weighted + density * (place + i)
-                end
-            end
+    if list_flows(x1, y1, x2, y2, z) > 0 then
+        if not read_density then read_density = prepareRead(flow_lists[1], READ_DENSITY) end
+        local read, count = read_density(flow_lists, flows_read)
+        local densities = read.density
+        listed = count
+        for i = 1, count do
+            local density = densities[i]
+            density_sum = density_sum + density
+            weighted = weighted + density * i
         end
     end
     return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
 end
-if readFields then flows_untouched = flows_untouched_read end
+if prepareRead then flows_untouched = flows_untouched_read end
 
 ----------------------------------------------------------------------------------------------
 -- Planning what to draw
