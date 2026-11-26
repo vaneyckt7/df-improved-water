@@ -339,6 +339,19 @@ local read_seen
 -- block its corner and the places in it where every level so far is open (false: all of them)
 local seen_list, seen_sources, seen_read = {}, {}, {}
 local scan_x, scan_y, scan_open, next_open = {}, {}, {}, {}
+-- Whether a block's read can be limited to a rectangle of its tiles (a "_range" of x and y indexes
+-- beside the grids): nil until tried on the first block. Tiles outside it are then never looked at.
+local can_range
+local function try_range(block)
+    local ok, read = pcall(prepareRead, {des = block.designation}, {fields = {'_index'}})
+    local out, count
+    if ok and type(read) == 'function' then
+        ok, out, count = pcall(read, {{des = block.designation, _range = {2, 3, 4, 5}}}, {})
+    end
+    local index = ok and type(out) == 'table' and out._index
+    return type(index) == 'table' and count == 4
+        and index[1] == 36 and index[2] == 37 and index[3] == 52 and index[4] == 53
+end
 -- the read of the dense waves for the wash (set up again when SEA_WASH changes), and its lists
 local read_wash, wash_read_for
 local wash_lists, wash_read = {}, {}
@@ -431,6 +444,20 @@ local function water_map(vp)
                         end
                         source.des, source.occ, source.tt, source.flow =
                             b.designation, b.occupancy, b.tiletype, b.liquid_flow
+                        if can_range == nil then can_range = try_range(b) end
+                        if can_range then
+                            -- only the part of the block inside the rectangle
+                            local range = source._range
+                            if not range then
+                                range = {}
+                                source._range = range
+                            end
+                            local block_x, block_y = scan_x[j], scan_y[j]
+                            range[1] = ax1 > block_x and ax1 - block_x or 0
+                            range[2] = ax2 < block_x + 15 and ax2 - block_x or 15
+                            range[3] = ay1 > block_y and ay1 - block_y or 0
+                            range[4] = ay2 < block_y + 15 and ay2 - block_y or 15
+                        end
                         seen_list[reading] = source
                         scan_x[reading], scan_y[reading], scan_open[reading] = scan_x[j], scan_y[j], scan_open[j]
                         next_open[reading] = false
