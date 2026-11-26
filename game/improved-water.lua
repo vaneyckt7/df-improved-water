@@ -308,6 +308,20 @@ local function sea_key()
     return f.waves and 'sea'
 end
 
+-- df.readFields reads chosen fields of everything in a game list in one call into the game. It is not in
+-- every DFHack: without it, or with one that answers differently from the one this was written for,
+-- everything is read one field at a time, with the same result.
+local readFields = df.readFields
+if readFields then
+    local ok, read, count = pcall(readFields, df.global.world.units.active, {fields = {'id'}}, {})
+    if not (ok and type(read) == 'table' and type(count) == 'number' and type(read.id) == 'table') then
+        readFields = nil
+    end
+end
+-- a map block's three tile grids read side by side; entry (x & 15) * 16 + (y & 15) + 1 is tile x, y
+local GRIDS = {fields = {'des', 'occ', 'tt'}}
+local grid_source, grid_pool = {}, {}
+
 -- The visible water, grouped by what it plays: state.cache.groups[key] = {n, x, y, k, at}, with key a drift
 -- direction ('north', 'east+north' on a border), 'none' (still), 'sea' or 'wash'; k is the tile's place in
 -- the 4x4-tile pattern and at its index into the map's screen layers for the view it was scanned in.
@@ -333,7 +347,8 @@ local function water_map(vp)
     local zmin = math.max(0, z0 - 4)
     local fx, fy, water, flow_tables = {}, {}, {}, {}
     -- what shows at one tile, looking down through open space
-    local function look(x, y)
+    local look
+    look = function(x, y)
         for z = z0, zmin, -1 do
             local d, occ = getFlags(x, y, z)
             if not d then return end
@@ -363,6 +378,54 @@ local function water_map(vp)
             -- (ground ends the look down, so only open space needs the building test)
             local tt = getType(x, y, z)
             if not tt or not OPEN[tt] or occ.whole & O_BUILDING ~= 0 then return end
+        end
+    end
+    -- The same look, with each map block's tiles read in one df.readFields call the first time one of
+    -- them is looked at (measured zoomed all the way out: the scan takes 20 to 45% less time).
+    if readFields then
+        local grids, used = {}, 0
+        look = function(x, y)
+            local i = (x & 15) * 16 + (y & 15) + 1
+            local column = (x >> 4) + (y >> 4) * 4096
+            for z = z0, zmin, -1 do
+                local block_key = column + z * 16777216
+                local grid = grids[block_key]
+                if grid == nil then
+                    local b = getBlock(x, y, z)
+                    if b then
+                        used = used + 1
+                        local slot = grid_pool[used]
+                        if not slot then slot = {}; grid_pool[used] = slot end
+                        grid_source.des, grid_source.occ, grid_source.tt = b.designation, b.occupancy, b.tiletype
+                        grid = readFields(grid_source, GRIDS, slot)
+                    else
+                        grid = false
+                    end
+                    grids[block_key] = grid
+                end
+                if not grid then return end
+                local des = grid.des[i]
+                if des & D_HIDDEN ~= 0 then return end
+                local taken = grid.occ[i]
+                if des & D_FLOW ~= 0 then
+                    if taken & O_BUILDING ~= 0 then return end
+                    if des & D_MAGMA == 0 then
+                        local k = (y - y1 + M) * W + (x - x1 + M)
+                        local flows = flow_tables[block_key]
+                        if flows == nil then
+                            local b = getBlock(x, y, z)
+                            flows = b and b.liquid_flow or false
+                            flow_tables[block_key] = flows
+                        end
+                        local dir = flows and flows[x & 15][y & 15].perm_flow_dir
+                        local flowing = dir and FLOWING[dir]
+                        water[k] = taken & O_UNIT ~= 0 and 3 or (flowing and 1 or (sea and des & D_SALT ~= 0) and 4 or 2)
+                        if flowing and FLOW_FX[dir] then fx[k], fy[k] = FLOW_FX[dir], FLOW_FY[dir] end
+                    end
+                    return
+                end
+                if not OPEN[grid.tt[i]] or taken & O_BUILDING ~= 0 then return end
+            end
         end
     end
     -- The view and one tile around it. Only flowing water needs the wider margin (its drift is averaged
@@ -844,21 +907,12 @@ local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 -- one number per flow found (what it is, where, its stage), to tell whether anything has changed
 local found, found_count = {}, 0
 
--- df.readFields reads chosen fields of everything in a game list in one call into the game (measured:
--- a scan in about a quarter of the time, the densities alone in a quarter). It is not in every DFHack:
--- without it, or with one that answers differently from the one this was written for, the flows are
--- read one field at a time. Each way has its own scan and its own check below; both list the same
--- flows in the same order.
+-- With df.readFields (see above) a block's flows are read in one call (measured: a scan in about a
+-- third of the time, the densities alone in a quarter). Each way has its own scan and its own check
+-- below; both list the same flows in the same order.
 local READ_SCAN = {fields = {'type', 'density', 'pos.x', 'pos.y'}}
 local READ_DENSITY = {fields = {'density'}}
 local flows_read = {}
-local readFields = df.readFields
-if readFields then
-    local ok, read, count = pcall(readFields, df.global.world.units.active, {fields = {'id'}}, {})
-    if not (ok and type(read) == 'table' and type(count) == 'number' and type(read.id) == 'table') then
-        readFields = nil
-    end
-end
 
 -- Reads the wave, foam and spray flows on level z in the map blocks that the rectangle touches. Each
 -- field read from a flow is a call into the game, so each is read once. Returns whether the flows are
