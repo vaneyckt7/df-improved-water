@@ -1005,11 +1005,31 @@ local PLAN_MARGIN = 2
 
 -- With df.prepareReadFields (see above) the flows of all the blocks are read in one call. Each way has
 -- its own scan and its own check below; both list the same flows in the same order.
-local READ_SCAN = {fields = {'type', 'density', 'pos.x', 'pos.y'}}
-local READ_DENSITY = {fields = {'density'}}
+local READ_SCAN = {'type', 'density', 'pos.x', 'pos.y'}
+local READ_DENSITY = {'density'}
 -- the two reads, set up when first used (that needs a map block's list of flows)
 local read_scan, read_density
 local flow_lists, flows_read = {}, {}
+-- the rectangle the two reads were set up for
+local read_x1, read_y1, read_x2, read_y2
+
+-- Sets up the two reads for a view. The game hands back only the flows that can matter: waves and spray
+-- within PLAN_MARGIN tiles of the view, and all the foam (a foam's stage counts from the density it was
+-- first seen at, so it is followed before it comes into view). flow_lists[1] must be filled in.
+local function prepare_flow_reads(x1, y1, x2, y2)
+    if read_scan and read_x1 == x1 and read_y1 == y1 and read_x2 == x2 and read_y2 == y2 then return end
+    local flow_type = df.flow_type
+    local where = {
+        {'density', '>', 0},
+        {'or', {'type', '==', flow_type.SeaFoam},
+            {'and', {'type', 'in', {flow_type.OceanWave, flow_type.Steam}},
+                {'pos.x', '>=', x1 - PLAN_MARGIN}, {'pos.x', '<=', x2 + PLAN_MARGIN},
+                {'pos.y', '>=', y1 - PLAN_MARGIN}, {'pos.y', '<=', y2 + PLAN_MARGIN}}},
+    }
+    read_scan = prepareRead(flow_lists[1], {fields = READ_SCAN, where = where})
+    read_density = prepareRead(flow_lists[1], {fields = READ_DENSITY, where = where})
+    read_x1, read_y1, read_x2, read_y2 = x1, y1, x2, y2
+end
 
 -- Lists the flows of the map blocks on level z that the rectangle touches, in flow_lists. Returns
 -- how many blocks that is.
@@ -1121,7 +1141,7 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     return same
 end
 
--- The same scan, reading the flows of every block in one call.
+-- The same scan, reading the flows of every block in one call (see prepare_flow_reads for which).
 local function find_flows_read(x1, y1, x2, y2, z, tick)
     local OceanWave, SeaFoam, Steam = df.flow_type.OceanWave, df.flow_type.SeaFoam, df.flow_type.Steam
     local zkey = z * 16777216
@@ -1130,7 +1150,7 @@ local function find_flows_read(x1, y1, x2, y2, z, tick)
     local remembered = 0
     local listed, density_sum, weighted = 0, 0, 0
     if list_flows(x1, y1, x2, y2, z) > 0 then
-        if not read_scan then read_scan = prepareRead(flow_lists[1], READ_SCAN) end
+        prepare_flow_reads(x1, y1, x2, y2)
         local read, count = read_scan(flow_lists, flows_read)
         local types, densities, xs, ys = read.type, read.density, read['pos.x'], read['pos.y']
         local place = listed
@@ -1231,11 +1251,11 @@ local function flows_untouched(x1, y1, x2, y2, z)
     return listed == flows_listed and density_sum == flows_density and weighted == flows_weighted
 end
 
--- The same check, reading the densities of every block in one call.
+-- The same check, reading the densities of the same flows as that scan in one call.
 local function flows_untouched_read(x1, y1, x2, y2, z)
     local listed, density_sum, weighted = 0, 0, 0
     if list_flows(x1, y1, x2, y2, z) > 0 then
-        if not read_density then read_density = prepareRead(flow_lists[1], READ_DENSITY) end
+        prepare_flow_reads(x1, y1, x2, y2)
         local read, count = read_density(flow_lists, flows_read)
         local densities = read.density
         listed = count
