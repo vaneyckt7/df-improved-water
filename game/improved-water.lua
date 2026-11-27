@@ -1186,12 +1186,12 @@ local spray_x, spray_y, spray_stage, spray_count = {}, {}, {}, 0
 -- one number per flow found (what it is, where, its stage), to tell whether anything has changed
 local found, found_count = {}, 0
 
--- The game keeps flows per map block, so a scan reads every block the view touches: up to 15 tiles past
--- each edge of it. Only the flows within PLAN_MARGIN tiles of the view are listed for planning. Nothing
--- farther away can change a piece inside the view: a rim comes from a wave beside it (1 tile), or from a
--- boulder beside it that has a wave beside that (2 tiles). Foam farther away is still remembered (its
--- stage counts from the density it was first seen at), and all the flows still count in the sums that
--- tell whether anything has changed.
+-- The game keeps flows per map block, so a scan reads every block within PLAN_MARGIN tiles of the view:
+-- up to 17 tiles past each edge of it. Only the flows within PLAN_MARGIN tiles of the view are listed for
+-- planning. Nothing farther away can change a piece inside the view: a rim comes from a wave beside it
+-- (1 tile), or from a boulder beside it that has a wave beside that (2 tiles). Foam farther away is still
+-- remembered (its stage counts from the density it was first seen at), and all the flows still count in
+-- the sums that tell whether anything has changed.
 local PLAN_MARGIN = 2
 
 -- With df.prepare_read_fields (see above) the flows of all the blocks are read in one call. Each way has
@@ -1222,12 +1222,14 @@ local function prepare_flow_reads(x1, y1, x2, y2)
     read_x1, read_y1, read_x2, read_y2 = x1, y1, x2, y2
 end
 
--- Lists the flows of the map blocks on level z that the rectangle touches, in flow_lists. Returns
--- how many blocks that is.
+-- Lists the flows of the map blocks on level z within PLAN_MARGIN tiles of the rectangle, in flow_lists.
+-- Returns how many blocks that is.
 local function list_flows(x1, y1, x2, y2, z)
     local lists = 0
-    for block_y = y1 - y1 % 16, y2, 16 do
-        for block_x = x1 - x1 % 16, x2, 16 do
+    local block_x1, block_y1 = x1 - PLAN_MARGIN, y1 - PLAN_MARGIN
+    block_x1, block_y1 = block_x1 - block_x1 % 16, block_y1 - block_y1 % 16
+    for block_y = block_y1, y2 + PLAN_MARGIN, 16 do
+        for block_x = block_x1, x2 + PLAN_MARGIN, 16 do
             local block = getTileBlock(block_x, block_y, z)
             if block then
                 lists = lists + 1
@@ -1249,8 +1251,10 @@ local function find_flows(x1, y1, x2, y2, z, tick)
     local near_x1, near_y1, near_x2, near_y2 = x1 - PLAN_MARGIN, y1 - PLAN_MARGIN, x2 + PLAN_MARGIN, y2 + PLAN_MARGIN
     local remembered = 0
     local listed, density_sum, weighted = 0, 0, 0
-    for block_y = y1 - y1 % 16, y2, 16 do
-        for block_x = x1 - x1 % 16, x2, 16 do
+    local block_x1, block_y1 = x1 - PLAN_MARGIN, y1 - PLAN_MARGIN
+    block_x1, block_y1 = block_x1 - block_x1 % 16, block_y1 - block_y1 % 16
+    for block_y = block_y1, y2 + PLAN_MARGIN, 16 do
+        for block_x = block_x1, x2 + PLAN_MARGIN, 16 do
             local block = getTileBlock(block_x, block_y, z)
             local flows = block and block.flows
             if flows then
@@ -1423,8 +1427,10 @@ if prepareRead then find_flows = find_flows_read end
 -- Returns whether the blocks' flows are as the last scan found them.
 local function flows_untouched(x1, y1, x2, y2, z)
     local listed, density_sum, weighted = 0, 0, 0
-    for block_y = y1 - y1 % 16, y2, 16 do
-        for block_x = x1 - x1 % 16, x2, 16 do
+    local block_x1, block_y1 = x1 - PLAN_MARGIN, y1 - PLAN_MARGIN
+    block_x1, block_y1 = block_x1 - block_x1 % 16, block_y1 - block_y1 % 16
+    for block_y = block_y1, y2 + PLAN_MARGIN, 16 do
+        for block_x = block_x1, x2 + PLAN_MARGIN, 16 do
             local block = getTileBlock(block_x, block_y, z)
             local flows = block and block.flows
             if flows then
