@@ -284,7 +284,9 @@ SLOW_MS, FAST_MS, STILL_MS = 120, 50, 80
 local function river_step_ms()
     local site = dfhack.world.getCurrentSite()
     local id = site and site.id or -1
-    if state.step_site == id and state.step_ms then return state.step_ms end
+    -- (site numbers repeat from world to world, so the world is part of what the speed is kept for)
+    local world = dfhack.world.ReadWorldFolder()
+    if state.step_site == id and state.step_world == world and state.step_ms then return state.step_ms end
     local flow = 0
     if site then
         for _, r in ipairs(df.global.world.world_data.rivers) do
@@ -296,7 +298,7 @@ local function river_step_ms()
     end
     -- log scale between flow 10 and 1000
     local f = math.max(0, math.min(1, (math.log(math.max(flow, 1), 10) - 1) / 2))
-    state.step_site, state.flow = id, flow
+    state.step_site, state.step_world, state.flow = id, world, flow
     state.step_ms = flow > 0 and math.floor(SLOW_MS + (FAST_MS - SLOW_MS) * f + 0.5) or STEP_MS
     return state.step_ms
 end
