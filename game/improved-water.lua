@@ -1831,7 +1831,7 @@ function WavesOverlay:buildDrawList(viewport, port, step)
         if x >= x1 and x <= x2 and y >= y1 and y <= y2 then
             local sx, sy = x - x1, y - y1
             local index = sx * dim_y + sy
-            if index < 0 or index >= layer_size then index = -1 end
+            if sy >= dim_y or index < 0 or index >= layer_size then index = -1 end
             local layer = piece_layer[i]
             if layer == NO_EDGE then
                 if index >= 0 then
