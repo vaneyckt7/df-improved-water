@@ -374,13 +374,14 @@ local function water_map(vp)
     -- While the game is paused nothing on the map moves: a list made for this view at this game tick is
     -- kept until the view moves or the game runs again. Two things can still change it then: the player
     -- placing or cancelling a building (a planned one covers its tiles at once), which changes the number
-    -- of buildings, and another fort being loaded, which changes the site or the year.
+    -- of buildings, and another fort being loaded, which changes the world, the site or the year.
     if state.cache then
         local age = now - state.cache_at
         if age < 100 and state.z == z0 or age < 500 and same_view
                 or same_view and state.cache_tick == df.global.cur_year_tick and df.global.pause_state
                     and state.cache_builds == #df.global.world.buildings.all
-                    and state.cache_site == df.global.plotinfo.site_id and state.cache_year == df.global.cur_year then
+                    and state.cache_site == df.global.plotinfo.site_id and state.cache_year == df.global.cur_year
+                    and state.cache_world == dfhack.world.ReadWorldFolder() then
             return state.cache
         end
     end
@@ -673,6 +674,7 @@ local function water_map(vp)
     state.cache, state.cache_at, state.z = cache, now, z0
     state.cache_tick = df.global.cur_year_tick
     state.cache_builds, state.cache_site, state.cache_year = #df.global.world.buildings.all, df.global.plotinfo.site_id, df.global.cur_year
+    state.cache_world = dfhack.world.ReadWorldFolder()
     return cache
 end
 
